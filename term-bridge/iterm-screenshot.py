@@ -42,7 +42,10 @@ def capture_and_send(*, caption: str | None = None) -> tuple[int, str]:
     if not chat:
         return 1, "TELEGRAM_CHAT_ID not set"
 
+    # iTerm2's launch/scripting name is "iTerm" but its System Events *process*
+    # name is "iTerm2" — window lookup needs the process name.
     app = os.environ.get("TG_ITERM_SCREENSHOT_APP", "iTerm").strip() or "iTerm"
+    proc = os.environ.get("TG_ITERM_SCREENSHOT_PROCESS", "iTerm2").strip() or "iTerm2"
     wait = os.environ.get("TG_ITERM_SCREENSHOT_WAIT", "0.3").strip() or "0.3"
     cap = caption or os.environ.get("TG_ITERM_SCREENSHOT_CAPTION", "iTerm").strip() or "iTerm"
 
@@ -55,6 +58,8 @@ def capture_and_send(*, caption: str | None = None) -> tuple[int, str]:
         "screenshot",
         "--app",
         app,
+        "--process",
+        proc,
         "--wait",
         wait,
         "--window-index",

@@ -232,6 +232,12 @@ def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
     if fmt == "screenshot":
         # New reply detected → send an iTerm screenshot instead of text.
         code, msg = _send_iterm_screenshot()
+        if code != 0:
+            # Screenshot failed (e.g. macOS Automation/Screen-Recording perms)
+            # → fall back to text so the reply is never lost.
+            t_code, t_msg = _send_tg(reply, "html")
+            if t_code == 0:
+                code, msg = 0, f"screenshot failed → sent text ({msg})"
     else:
         code, msg = _send_tg(reply, fmt)
     if code == 0:
