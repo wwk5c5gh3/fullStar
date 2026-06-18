@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIDFILE="$COMPOSE_ROOT/.ios-proxy.pid"
 LOG="$COMPOSE_ROOT/.ios-proxy.log"
 

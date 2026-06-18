@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MONOREPO_ROOT="$(cd "$COMPOSE_ROOT/.." && pwd)"
 WDA_DIR="${WDA_DIR:-$MONOREPO_ROOT/WebDriverAgent}"
 

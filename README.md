@@ -108,9 +108,20 @@ mob-remote/                  # 仓库根（原 mobile-agent）
 
 ## 快速开始
 
+### ★ 一键安装（推荐）
+
 ```bash
-cd mobile-agent
-chmod +x mobagent mob-compose/compose mob-compose/scripts/*.sh scripts/*.sh tg-relay.py tg-relay/setup-telegram.sh
+./oneClickSetup.sh            # 自动 chmod + 准备 .env + ./mob setup + ./mob check
+./oneClickSetup.sh --test     # 安装后跑冒烟测试
+./oneClickSetup.sh --only tg,adb   # 仅装某些组合，参数透传给 ./mob setup
+```
+
+`oneClickSetup.sh` 替你完成 README 里原本要手动做的步骤（赋可执行权限、从 `.env.example` 创建 `.env`），再调用现成的 `./mob setup`。
+
+### 手动分步
+
+```bash
+chmod +x mob mobagent mob-compose/compose mob-compose/scripts/*.sh scripts/*.sh tg-relay/*.sh
 
 # ★ Telegram 一键配置（交互式 + 测试消息）
 ./mob tg-setup --test

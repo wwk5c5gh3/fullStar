@@ -4,29 +4,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-declare -A SKILL_DIR=(
-  [tg]=tg-notify-skill
-  [tg-notify]=tg-notify-skill
-  [tgkit]=tg-notify-skill
-  [adb]=droid-ctl-skill
-  [droid-ctl]=droid-ctl-skill
-  [ios]=iphone-ctl-skill
-  [iphone-ctl]=iphone-ctl-skill
-  [mob-remote]=mob-remote-skill
-  [mobile-agent]=mob-remote-skill
-)
-
-declare -A SKILL_CURSOR_NAME=(
-  [tg]=tg-notify
-  [tg-notify]=tg-notify
-  [tgkit]=tg-notify
-  [adb]=droid-ctl
-  [droid-ctl]=droid-ctl
-  [ios]=iphone-ctl
-  [iphone-ctl]=iphone-ctl
-  [mob-remote]=mob-remote
-  [mobile-agent]=mob-remote
-)
+# 用函数代替关联数组：declare -A 需要 bash 4+，而 macOS 默认 bash 仍是 3.2
+skill_dir() {
+  case "$1" in
+    tg|tg-notify|tgkit)       echo "tg-notify-skill" ;;
+    adb|droid-ctl)            echo "droid-ctl-skill" ;;
+    ios|iphone-ctl)           echo "iphone-ctl-skill" ;;
+    mob-remote|mobile-agent)  echo "mob-remote-skill" ;;
+    *)                        echo "" ;;
+  esac
+}
 
 usage() {
   cat <<'EOF'
@@ -73,7 +60,8 @@ install_mob_remote() {
 
 install_sub_skill() {
   local id="$1"
-  local dir="${SKILL_DIR[$id]:-}"
+  local dir
+  dir="$(skill_dir "$id")"
   if [[ -z "$dir" ]]; then
     echo "unknown skill: $id" >&2
     return 1
@@ -89,7 +77,9 @@ install_sub_skill() {
 }
 
 normalize_id() {
-  local raw="${1,,}"
+  # 小写化用 tr，避免 bash 4 的 ${1,,}（macOS bash 3.2 不支持）
+  local raw
+  raw="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   raw="${raw/_skill/}"
   raw="${raw/-skill/}"
   case "$raw" in
@@ -130,12 +120,13 @@ if [[ "$INSTALL_ALL" -eq 1 ]] || [[ ${#SELECTED[@]} -eq 0 ]]; then
   SELECTED=(tg-notify droid-ctl iphone-ctl mob-remote)
 fi
 
-declare -A _seen=()
+# 字符串去重，避免关联数组（bash 3.2 兼容）
+_seen=" "
 UNIQUE=()
 for s in "${SELECTED[@]}"; do
   [[ -n "$s" ]] || continue
-  [[ -n "${_seen[$s]:-}" ]] && continue
-  _seen[$s]=1
+  case "$_seen" in *" $s "*) continue ;; esac
+  _seen+="$s "
   UNIQUE+=("$s")
 done
 SELECTED=("${UNIQUE[@]}")

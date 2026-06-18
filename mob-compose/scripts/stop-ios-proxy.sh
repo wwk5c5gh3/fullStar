@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIDFILE="$COMPOSE_ROOT/.ios-proxy.pid"
 
 if [[ ! -f "$PIDFILE" ]]; then
