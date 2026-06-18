@@ -20,6 +20,7 @@ from iterm_extract import (  # noqa: E402
     normalize_for_stable_compare,
 )
 from iterm_target import resolve_target  # noqa: E402
+from tg_format import format_reply, strip_terminal_noise  # noqa: E402
 
 
 def _monitor_file(kind: str) -> Path:
@@ -172,31 +173,53 @@ def _send_iterm_screenshot() -> tuple[int, str]:
         return 0, out or "screenshot sent"
     return r.returncode, out or "screenshot failed"
 
-def _send_tg(text: str) -> tuple[int, str]:
-    text = text.strip()
-    if not text:
+def _output_format() -> str:
+    """TG_ITERM_FORMAT: html (default) | markdown | plain | screenshot."""
+    v = os.environ.get("TG_ITERM_FORMAT", "html").strip().lower()
+    if v in ("md", "markdownv2"):
+        return "markdown"
+    if v in ("text", "none"):
+        return "plain"
+    if v in ("html", "markdown", "plain", "screenshot"):
+        return v
+    return "html"
+
+
+def _run_send(env: dict, chat_id: int, text: str, parse_mode: str | None) -> tuple[int, str]:
+    cmd = ["tg-notify", "send", "--chat-id", str(chat_id)]
+    if parse_mode:
+        cmd += ["--parse-mode", parse_mode]
+    cmd += ["--text", text]  # --text avoids leading '-' being parsed as a flag
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=60, env=env)
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    return r.returncode, out
+
+
+def _send_tg(text: str, fmt: str = "html") -> tuple[int, str]:
+    raw = text.strip()
+    if not raw:
         return 0, "skip empty"
-    if len(text) > 3900:
-        text = "…\n" + text[-3900:]
 
     token, chat_id, err = _resolve_monitor_target()
     if err:
         return 1, err
-
     env = {**os.environ, "TELEGRAM_BOT_TOKEN": token or ""}
-    cmd = ["tg-notify", "send", "--chat-id", str(chat_id), text]
-    r = subprocess.run(
-        cmd,
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env=env,
-    )
-    out = ((r.stdout or "") + (r.stderr or "")).strip()
-    if r.returncode == 0:
-        return 0, f"sent to private chat {chat_id} ({out or 'ok'})"
-    return r.returncode, out
+
+    # Preferred: phone-friendly markup in the chosen format.
+    body, parse_mode = format_reply(raw, fmt)
+    if body:
+        code, out = _run_send(env, chat_id, body, parse_mode)
+        if code == 0:
+            return 0, f"sent to private chat {chat_id} [{fmt}] ({out or 'ok'})"
+
+    # Fallback: cleaned plain text, so a reply is never lost on a markup error.
+    plain = strip_terminal_noise(raw) or raw
+    if len(plain) > 3900:
+        plain = "…\n" + plain[-3900:]
+    code, out = _run_send(env, chat_id, plain, parse_mode=None)
+    if code == 0:
+        return 0, f"sent to private chat {chat_id} plain ({out or 'ok'})"
+    return code, out
 
 
 def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
@@ -208,7 +231,12 @@ def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
     if not force and reply == last_sent:
         return 0, "already sent"
 
-    code, msg = _send_tg(reply)
+    fmt = _output_format()
+    if fmt == "screenshot":
+        # New reply detected → send an iTerm screenshot instead of text.
+        code, msg = _send_iterm_screenshot()
+    else:
+        code, msg = _send_tg(reply, fmt)
     if code == 0:
         _write_last_sent(reply)
         _write_last_sent_at(time.time())

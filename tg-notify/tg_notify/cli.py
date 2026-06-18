@@ -51,6 +51,11 @@ def main(argv=None) -> int:
     send_parser.add_argument("--text", help="Text message body")
     send_parser.add_argument("--photo", help="Path to an image (inline preview)")
     send_parser.add_argument("--file", help="Path to a file to send as document")
+    send_parser.add_argument(
+        "--parse-mode",
+        choices=["HTML", "MarkdownV2", "Markdown"],
+        help="Render text with Telegram formatting (HTML / MarkdownV2 / Markdown)",
+    )
     _add_common_args(send_parser)
 
     shot_parser = subparsers.add_parser("screenshot", help="Capture screen and send (macOS)")
@@ -78,7 +83,8 @@ def main(argv=None) -> int:
 
             text_body = args.text or args.message
             if text_body:
-                result = notifier.text(text_body, chat_id=args.chat_id)
+                extra = {"parse_mode": args.parse_mode} if args.parse_mode else {}
+                result = notifier.text(text_body, chat_id=args.chat_id, **extra)
                 print(f"sent text to chat_id={result.chat_id} message_id={result.message_id}")
             if args.photo:
                 result = notifier.photo(
