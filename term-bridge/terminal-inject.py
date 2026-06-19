@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
 from iterm_target import ItermTarget, resolve_target  # noqa: E402
-from terminal_inject_lib import build_inject_script  # noqa: E402
+from terminal_inject_lib import build_inject_script, build_key_script  # noqa: E402
 
 _ACCESS_HINT = (
     "\n\n需要授权宿主进程（Terminal / Claude Code / Python）："
@@ -94,19 +94,49 @@ def inject(
             pass
 
 
+def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str]:
+    if sys.platform != "darwin":
+        return 1, "Terminal inject requires macOS"
+    _load_env()
+    t = target or resolve_target()
+    script = build_key_script(window=t.window, tab=t.tab, key=key)
+    r = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+    )
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    if r.returncode != 0:
+        if _needs_access_hint(out):
+            out += _ACCESS_HINT
+        return r.returncode, out or "osascript failed"
+    return 0, out or "ok"
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Paste text into a Terminal.app window/tab")
+    parser = argparse.ArgumentParser(description="Paste text or press a key (--key) in a Terminal.app window/tab")
     parser.add_argument("text", nargs="?", help="Text to inject (or stdin)")
     parser.add_argument("--window", type=int, help="Window index (1-based); omit with --front-window")
     parser.add_argument("--front-window", action="store_true", help="Use frontmost Terminal window")
     parser.add_argument("--tab", type=int, help="Tab index (1-based)")
     parser.add_argument("--session", type=int, help="Ignored for Terminal (no split panes)")
     parser.add_argument("--no-enter", action="store_true", help="Paste without pressing Return")
+    parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     win = None if args.front_window else args.window
     target = resolve_target(window=win, tab=args.tab, session=None)
+
+    if args.key:
+        if args.dry_run:
+            print(f"would press {args.key} to Terminal ({target.label()})")
+            return 0
+        code, out = inject_key(args.key, target=target)
+        if code != 0:
+            print(out, file=sys.stderr)
+            return code
+        print(f"{out} [{target.label()}]")
+        return 0
 
     text = args.text if args.text is not None else sys.stdin.read()
     if args.dry_run:

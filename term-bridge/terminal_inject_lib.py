@@ -8,9 +8,43 @@ named by the TERM_INJECT_FILE env var to avoid AppleScript string escaping.
 """
 from __future__ import annotations
 
+_KEY_ACTIONS = {"enter": "keystroke return", "esc": "key code 53"}
+
 
 def _window_ref(window: int | None) -> str:
     return "front window" if window is None else f"window {int(window)}"
+
+
+def build_key_script(*, window: int | None, tab: int, key: str) -> str:
+    """`on run` AppleScript that focuses the target Terminal tab and presses one key."""
+    if key not in _KEY_ACTIONS:
+        raise ValueError(f"unknown key: {key!r}")
+    win = _window_ref(window)
+    action = _KEY_ACTIONS[key]
+    focus_window = (
+        f"    try\n"
+        f"        set index of {win} to 1\n"
+        f"    end try\n"
+        f"    try\n"
+        f"        set selected of tab {int(tab)} of {win} to true\n"
+        f"    end try\n"
+    )
+    return (
+        "on run\n"
+        '    if application "Terminal" is not running then error "No Terminal running"\n'
+        '    tell application "Terminal"\n'
+        f"{focus_window}"
+        "    end tell\n"
+        '    tell application "System Events"\n'
+        '        set frontmost of process "Terminal" to true\n'
+        "        repeat 40 times\n"
+        '            if frontmost of process "Terminal" then exit repeat\n'
+        "            delay 0.05\n"
+        "        end repeat\n"
+        f"        {action}\n"
+        "    end tell\n"
+        "end run\n"
+    )
 
 
 def build_inject_script(*, window: int | None, tab: int, submit_enter: bool) -> str:

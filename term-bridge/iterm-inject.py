@@ -45,6 +45,27 @@ end run
 )
 
 
+def _key_applescript(key: str) -> str:
+    """AppleScript that sends a single key to the target iTerm session.
+
+    enter → write an empty line (iTerm appends newline = Return).
+    esc   → write the ESC byte without a trailing newline.
+    """
+    if key == "enter":
+        action = '                    write text ""'
+    elif key == "esc":
+        action = "                    write text (character id 27) without newline"
+    else:
+        raise ValueError(f"unknown key: {key!r}")
+    return (
+        "on run\n"
+        + applescript_session_block()
+        + "\n" + action + "\n"
+        + applescript_session_close(extra_close=0)
+        + '\n    tell application "iTerm" to activate\nend run\n'
+    )
+
+
 def _load_env() -> None:
     env_path = ROOT / ".env"
     if os.environ.get("TGKIT_ENV_FILE"):
@@ -99,6 +120,21 @@ def inject(
             pass
 
 
+def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str]:
+    """Execute _key_applescript via osascript; returns (returncode, message)."""
+    if sys.platform != "darwin":
+        return 1, "iTerm inject requires macOS"
+    _load_env()
+    t = target or resolve_target()
+    env = apply_target_env(t)
+    r = subprocess.run(
+        ["osascript", "-e", _key_applescript(key)],
+        env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+    )
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    return r.returncode, out or ("ok" if r.returncode == 0 else "osascript failed")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Type text into iTerm2 window/tab")
     parser.add_argument("text", nargs="?", help="Text to inject (or stdin)")
@@ -107,11 +143,23 @@ def main() -> int:
     parser.add_argument("--tab", type=int, help="Tab index (1-based)")
     parser.add_argument("--session", type=int, help="Split pane index (1-based); default active pane")
     parser.add_argument("--no-enter", action="store_true", help="Type without pressing Enter")
+    parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     win = None if args.front_window else args.window
     target = resolve_target(window=win, tab=args.tab, session=args.session)
+
+    if args.key:
+        if args.dry_run:
+            print(f"would press {args.key} to iTerm ({target.label()})")
+            return 0
+        code, out = inject_key(args.key, target=target)
+        if code != 0:
+            print(out, file=sys.stderr)
+            return code
+        print(f"{out} [{target.label()}]")
+        return 0
 
     text = args.text if args.text is not None else sys.stdin.read()
     if args.dry_run:
