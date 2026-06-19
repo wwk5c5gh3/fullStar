@@ -43,3 +43,9 @@ def test_is_allowed_membership():
     assert al.is_allowed(1, allowed) is True
     assert al.is_allowed(3, allowed) is False
     assert al.is_allowed(None, allowed) is False
+
+
+def test_is_allowed_zero_chat_id():
+    # 0 is not a real Telegram id, but the falsy value must not bypass the gate
+    assert al.is_allowed(0, frozenset({1})) is False
+    assert al.is_allowed(0, frozenset({0})) is True

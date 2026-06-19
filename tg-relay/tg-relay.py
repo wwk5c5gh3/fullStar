@@ -228,14 +228,27 @@ def main() -> int:
         os.environ.get("TG_RELAY_ALLOWED_CHAT_IDS", ""),
         os.environ.get("TELEGRAM_CHAT_ID", ""),
     )
+    allow_all = os.environ.get("TG_RELAY_ALLOW_ALL_CHATS", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
     if allowed:
         print(f"chat allow-list active: {sorted(allowed)}")
-    else:
+    elif allow_all:
         print(
-            "WARNING: no chat allow-list (set TG_RELAY_ALLOWED_CHAT_IDS or "
-            "TELEGRAM_CHAT_ID) — bot accepts all chats",
+            "WARNING: TG_RELAY_ALLOW_ALL_CHATS set — bot accepts ALL chats; "
+            "anyone who finds the bot can drive your terminal",
             file=sys.stderr,
         )
+    else:
+        # Fail closed: this bot types into a live terminal, so never accept
+        # arbitrary chats by default.
+        print(
+            "ERROR: no chat allow-list — refusing to start. Set TELEGRAM_CHAT_ID "
+            "(owner) or TG_RELAY_ALLOWED_CHAT_IDS, or TG_RELAY_ALLOW_ALL_CHATS=1 "
+            "to explicitly allow all chats.",
+            file=sys.stderr,
+        )
+        return 1
 
     def _keyboard(rows):
         return InlineKeyboardMarkup(
@@ -295,7 +308,7 @@ def main() -> int:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_handler(MessageHandler(filters.COMMAND, on_message))
     print(f"mobile-agent tg-relay listening (root={ROOT})")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=["message", "callback_query"])
     return 0
 
 
