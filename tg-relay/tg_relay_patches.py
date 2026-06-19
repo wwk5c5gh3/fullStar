@@ -15,6 +15,7 @@ import term_backend
 from iterm_route import format_tabs_message, parse_routed_message
 from iterm_target import apply_target_env, resolve_target
 from tg_format_config import VALID as _FORMATS, get_format, set_format
+from tg_new_command import SpawnResult, retarget_env
 
 
 def _inject_iterm(text: str, target=None) -> tuple[int, str]:
@@ -74,8 +75,7 @@ def _schedule_iterm_monitor_poll(target=None) -> None:
     )
 
 
-def _parse_spawn_output(code: int, stdout: str, stderr: str):
-    from tg_new_command import SpawnResult
+def _parse_spawn_output(code: int, stdout: str, stderr: str) -> SpawnResult:
     tab = None
     workdir = ""
     m = re.search(r"^tab=(\d+)$", stdout or "", re.M)
@@ -88,7 +88,7 @@ def _parse_spawn_output(code: int, stdout: str, stderr: str):
     return SpawnResult(code=code, tab=tab, workdir=workdir, raw=raw)
 
 
-def _spawn_session(agent_key: str, prompt: str):
+def _spawn_session(agent_key: str, prompt: str) -> SpawnResult:
     cmd = [sys.executable, str(ROOT / "term-bridge" / "terminal-spawn.py"), "--agent", agent_key]
     if prompt:
         cmd.extend(["--prompt", prompt])
@@ -171,9 +171,7 @@ def apply(mod: ModuleType) -> None:
             reply, new_tab = handle_new(
                 parts[1:], is_macos=(sys.platform == "darwin"), spawn=_spawn_session
             )
-            if new_tab is not None:
-                os.environ["TG_ITERM_WINDOW"] = "front"
-                os.environ["TG_ITERM_TAB"] = str(new_tab)
+            os.environ.update(retarget_env(new_tab))
             return reply
         return orig_cmd(text)
 

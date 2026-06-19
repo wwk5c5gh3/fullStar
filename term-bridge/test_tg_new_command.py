@@ -55,3 +55,11 @@ def test_failure_reports_error_no_tab():
     reply, tab = nc.handle_new(["claude"], is_macos=True, spawn=_fail)
     assert tab is None
     assert "boom" in reply
+
+
+def test_retarget_env_none_is_empty():
+    assert nc.retarget_env(None) == {}
+
+
+def test_retarget_env_sets_front_window_and_tab():
+    assert nc.retarget_env(3) == {"TG_ITERM_WINDOW": "front", "TG_ITERM_TAB": "3"}

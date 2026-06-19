@@ -62,3 +62,10 @@ def handle_new(
         "(后续消息将注入此会话)"
     )
     return (reply, res.tab)
+
+
+def retarget_env(tab: int | None) -> dict[str, str]:
+    """Env changes to route subsequent injects to the new tab (empty if no tab)."""
+    if tab is None:
+        return {}
+    return {"TG_ITERM_WINDOW": "front", "TG_ITERM_TAB": str(tab)}
