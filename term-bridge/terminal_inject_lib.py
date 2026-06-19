@@ -16,16 +16,17 @@ def _window_ref(window: int | None) -> str:
 def build_inject_script(*, window: int | None, tab: int, submit_enter: bool) -> str:
     """Full `on run` AppleScript for one clipboard-paste injection."""
     win = _window_ref(window)
-    submit = "    keystroke return\n" if submit_enter else ""
+    # Paste is async; let it settle into the input buffer before Return submits.
+    submit = "        delay 0.2\n        keystroke return\n" if submit_enter else ""
     # Best-effort focus of the requested window/tab; wrapped so a read-only
-    # property or single-tab window never aborts the paste.
+    # property or single-window setup never aborts the paste.
     focus_window = (
-        f"        try\n"
-        f"            set frontmost of {win} to true\n"
-        f"        end try\n"
-        f"        try\n"
-        f"            set selected of tab {int(tab)} of {win} to true\n"
-        f"        end try\n"
+        f"    try\n"
+        f"        set index of {win} to 1\n"
+        f"    end try\n"
+        f"    try\n"
+        f"        set selected of tab {int(tab)} of {win} to true\n"
+        f"    end try\n"
     )
     return (
         "on run\n"
@@ -44,10 +45,17 @@ def build_inject_script(*, window: int | None, tab: int, submit_enter: bool) -> 
         "        set priorApp to name of first process whose frontmost is true\n"
         "    end tell\n"
         '    tell application "Terminal"\n'
-        "        activate\n"
         f"{focus_window}"
         "    end tell\n"
         '    tell application "System Events"\n'
+        # `tell app to activate` does NOT reliably raise Terminal from a
+        # background osascript; set-frontmost does. Then wait until it's really
+        # frontmost so Cmd-V doesn't land in the previously focused window.
+        '        set frontmost of process "Terminal" to true\n'
+        "        repeat 40 times\n"
+        '            if frontmost of process "Terminal" then exit repeat\n'
+        "            delay 0.05\n"
+        "        end repeat\n"
         '        keystroke "v" using command down\n'
         f"{submit}"
         "    end tell\n"

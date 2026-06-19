@@ -46,6 +46,13 @@ def test_script_guards_not_running_to_avoid_autolaunch():
     assert "is not running" in build_window_id_script(1, app="Terminal")
 
 
+def test_terminal_front_window_uses_front_not_current():
+    # "current window" is iTerm-only; Terminal.app needs "front window"
+    script = build_window_id_script(None, app="Terminal")
+    assert "front window" in script
+    assert "current window" not in script
+
+
 # ── parse_window_id ──
 
 def test_parse_plain_id():

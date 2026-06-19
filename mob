@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE="$ROOT/mob-compose/compose"
 
+# Active terminal backend: TG_TERM_BACKEND env, else .env, else iterm.
+term_backend() {
+  local b="${TG_TERM_BACKEND:-}"
+  if [[ -z "$b" && -f "$ROOT/.env" ]]; then
+    b="$(grep -E '^[[:space:]]*TG_TERM_BACKEND=' "$ROOT/.env" | tail -1 | cut -d= -f2 | tr -d " \"'")"
+  fi
+  b="$(printf '%s' "${b:-iterm}" | tr '[:upper:]' '[:lower:]')"
+  [[ "$b" == "terminal" ]] && echo terminal || echo iterm
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -35,20 +45,41 @@ case "$cmd" in
   tg-inbox)
     exec cat "$ROOT/inbox/pending.txt" 2>/dev/null || echo "(inbox empty)"
     ;;
-  iterm-inject|tg-iterm|term-inject)
+  # Backend-aware (respect TG_TERM_BACKEND=iterm|terminal)
+  inject|tg-iterm|term-inject)
+    exec python3 "$ROOT/term-bridge/$(term_backend)-inject.py" "$@"
+    ;;
+  capture|term-capture)
+    exec python3 "$ROOT/term-bridge/$(term_backend)-capture.py" "$@"
+    ;;
+  shot|term-screenshot)
+    exec python3 "$ROOT/term-bridge/$(term_backend)-screenshot.py" "$@"
+    ;;
+  # Explicit iTerm backend
+  iterm-inject)
     exec python3 "$ROOT/term-bridge/iterm-inject.py" "$@"
     ;;
-  iterm-capture|term-capture)
+  iterm-capture)
     exec python3 "$ROOT/term-bridge/iterm-capture.py" "$@"
+    ;;
+  iterm-screenshot)
+    exec python3 "$ROOT/term-bridge/iterm-screenshot.py" "$@"
+    ;;
+  # Explicit Terminal.app backend
+  terminal-inject)
+    exec python3 "$ROOT/term-bridge/terminal-inject.py" "$@"
+    ;;
+  terminal-capture)
+    exec python3 "$ROOT/term-bridge/terminal-capture.py" "$@"
+    ;;
+  terminal-screenshot)
+    exec python3 "$ROOT/term-bridge/terminal-screenshot.py" "$@"
     ;;
   iterm-monitor|iterm-monitor-start|term-monitor)
     exec python3 "$ROOT/term-bridge/iterm-monitor.py" "$@"
     ;;
   iterm-extract|term-extract)
     exec python3 "$ROOT/term-bridge/iterm_extract.py" "$@"
-    ;;
-  iterm-screenshot|term-screenshot)
-    exec python3 "$ROOT/term-bridge/iterm-screenshot.py" "$@"
     ;;
   iterm-list|term-list)
     exec python3 "$ROOT/term-bridge/iterm-list.py" "$@"
@@ -79,18 +110,19 @@ mob-remote extras:
   tg-status      Show tg-relay + term-bridge status + logs
   tg-relay-once  Run tg-relay once in foreground (debug)
   tg-inbox       Show pending natural-language tasks for Agent
-  term-inject    Type text into iTerm2 (TG_ITERM_WINDOW/TAB)
+  inject         Type text into active terminal (TG_TERM_BACKEND) — e.g. ./mob inject "hi"
+  capture        Read active terminal output (--tail 50)
+  shot           Capture active terminal window -> Telegram
   term-list      List iTerm windows/tabs for configuration
-  term-capture   Read iTerm2 session output (--tail 50)
   term-extract   Preview assistant reply extracted for Telegram
-  term-screenshot  Capture iTerm window -> Telegram
   term-buffer-setup  Set iTerm2 unlimited scrollback (macOS)
-  term-monitor   Poll iTerm -> Telegram (assistant reply only)
+  term-monitor   Poll terminal -> Telegram (assistant reply only)
   term-monitor-once  Extract latest reply and send once to TG
   install-skill  Install skills (composable: --only tg-notify,droid-ctl,iphone-ctl)
                  ./mob install-skill --list
 
-Legacy aliases: mobagent, iterm-* (same as term-*)
+Backend: TG_TERM_BACKEND=iterm|terminal selects target. inject/capture/shot and
+  term-* follow it; force with iterm-inject / terminal-inject (also -capture / -screenshot).
 EOF
     ;;
   *)

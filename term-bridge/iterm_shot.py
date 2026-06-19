@@ -20,7 +20,8 @@ def build_window_id_script(window: int | None, app: str = "iTerm") -> str:
     window` as the CGWindowID that `screencapture -l` expects.
     """
     if window is None:
-        win_spec = "current window"
+        # iTerm's frontmost is "current window"; Terminal.app uses "front window".
+        win_spec = "current window" if app == "iTerm" else "front window"
     else:
         win_spec = f"window {int(window)}"
     return (
