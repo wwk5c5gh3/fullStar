@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "term-bridge"))
+from tg_menu import MENU_COMMANDS, dispatch_callback, menu_for_command  # noqa: E402
+
 INBOX_DIR = ROOT / "inbox"
 INBOX_FILE = INBOX_DIR / "pending.txt"
 
@@ -203,29 +206,64 @@ def main() -> int:
         return 0
 
     try:
-        from telegram import Update
-        from telegram.ext import Application, CommandHandler, MessageHandler, filters
+        from telegram import (
+            BotCommand,
+            InlineKeyboardButton,
+            InlineKeyboardMarkup,
+            Update,
+        )
+        from telegram.ext import (
+            Application,
+            CallbackQueryHandler,
+            CommandHandler,
+            MessageHandler,
+            filters,
+        )
     except ImportError:
         print("pip install python-telegram-bot", file=sys.stderr)
         return 1
+
+    def _keyboard(rows):
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton(label, callback_data=data)] for label, data in rows]
+        )
 
     async def on_message(update: Update, context) -> None:
         if not update.message or not update.message.text:
             return
         text = update.message.text.strip()
         chat_id = update.effective_chat.id or 0
-        if not text.startswith("/"):
-            reply = _handle_natural_language(chat_id, text)
-        else:
+        if text.startswith("/"):
+            sub = menu_for_command(text)
+            if sub:
+                await update.message.reply_text("请选择：", reply_markup=_keyboard(sub))
+                return
             reply = _handle_command(text)
+        else:
+            reply = _handle_natural_language(chat_id, text)
         await update.message.reply_text(reply[:4000])
+
+    async def on_callback(update: Update, context) -> None:
+        q = update.callback_query
+        if not q:
+            return
+        await q.answer()
+        reply = dispatch_callback(q.data or "", _handle_command)
+        await q.edit_message_text(reply[:4000])
 
     async def start_cmd(update: Update, context) -> None:
         await update.message.reply_text(_handle_command("/help"))
 
-    app = Application.builder().token(token).build()
+    async def post_init(app) -> None:
+        try:
+            await app.bot.set_my_commands([BotCommand(c, d) for c, d in MENU_COMMANDS])
+        except Exception as e:  # menu is a convenience; never block startup
+            print(f"set_my_commands failed: {e}", file=sys.stderr)
+
+    app = Application.builder().token(token).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", start_cmd))
+    app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_handler(MessageHandler(filters.COMMAND, on_message))
     print(f"mobile-agent tg-relay listening (root={ROOT})")
