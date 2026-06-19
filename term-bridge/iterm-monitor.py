@@ -19,6 +19,7 @@ from iterm_extract import (  # noqa: E402
     is_reply_complete,
     new_content_since,
     normalize_for_stable_compare,
+    should_text_fallback,
 )
 from iterm_target import resolve_target  # noqa: E402
 from tg_format import format_reply, strip_terminal_noise  # noqa: E402
@@ -141,6 +142,21 @@ def _screenshot_idle_seconds() -> float:
         return max(0.0, float(raw))
     except ValueError:
         return 60.0
+
+
+def _text_fallback_seconds() -> float:
+    """Force-send the latest reply as text after it's been stable this long.
+
+    Safety net for when the completion marker isn't recognized: 90s default,
+    0/off disables. Env: TG_ITERM_MONITOR_TEXT_FALLBACK.
+    """
+    raw = os.environ.get("TG_ITERM_MONITOR_TEXT_FALLBACK", "90").strip()
+    if raw.lower() in ("", "0", "false", "no", "off"):
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 90.0
 
 
 def _screenshot_marked_for_turn(sent_at: float) -> bool:
@@ -279,11 +295,13 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
         return 1
     stable_polls = max(1, int(os.environ.get("TG_ITERM_MONITOR_STABLE_POLLS", "2")))
     screenshot_idle = _screenshot_idle_seconds()
+    text_fallback = _text_fallback_seconds()
     target = resolve_target()
     print(
         f"iterm-monitor: @landpage_ipa_addr_bot private chat_id={chat_id} "
         f"target={target.label()} tail={tail_lines} interval={interval}s "
-        f"stable_polls={stable_polls} screenshot_idle={screenshot_idle}s",
+        f"stable_polls={stable_polls} screenshot_idle={screenshot_idle}s "
+        f"text_fallback={text_fallback}s",
         flush=True,
     )
     last_capture = ""
@@ -328,6 +346,20 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
             elif msg != "already sent":
                 print(f"[{ts}] {msg}", flush=True)
             stable_count = 0
+
+        # 90s text catch-up: completion marker missed but the reply settled →
+        # force-send the text so a finished answer never sits unsent.
+        if should_text_fallback(
+            reply_now, _read_last_sent(), time.time() - last_extract_change_at, text_fallback
+        ):
+            fb_code, fb_msg = _maybe_send_reply(current)
+            if fb_code == 0 and fb_msg not in ("no assistant reply", "already sent"):
+                print(f"[{ts}] {fb_msg} (text fallback {text_fallback:.0f}s)", flush=True)
+                stable_count = 0
+                if once:
+                    return 0
+                time.sleep(interval)
+                continue
 
         if screenshot_idle > 0:
             last_sent_at = _read_last_sent_at()

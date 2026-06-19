@@ -205,6 +205,25 @@ def new_content_since(reply: str, last_sent: str) -> str:
     return "\n".join(tail).strip()
 
 
+def should_text_fallback(
+    reply: str, last_sent: str, since_extract: float, threshold: float
+) -> bool:
+    """Whether to force-send `reply` as a 90s text catch-up.
+
+    Fires when the completion marker was missed but the extracted reply has been
+    stable (`since_extract`) for at least `threshold` seconds and still differs
+    from what was last sent, so a finished answer never sits unsent. A
+    non-positive threshold disables the fallback.
+    """
+    if threshold <= 0:
+        return False
+    if not reply or not reply.strip():
+        return False
+    if reply == last_sent:
+        return False
+    return since_extract >= threshold
+
+
 def _extract_after_crunched(lines: list[str]) -> str:
     crunch_idx = -1
     for i in range(len(lines) - 1, -1, -1):
