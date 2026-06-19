@@ -53,3 +53,15 @@ def test_session_usage_lists_models():
 def test_session_usage_lists_effort_levels():
     u = sc.session_usage("/think")
     assert "high" in u and "max" in u
+
+
+def test_model_arg_is_case_insensitive():
+    assert sc.resolve_session_command("/model", "OPUS") == sc.InjectAction(kind="text", payload="/model opus")
+
+
+def test_command_is_case_insensitive():
+    assert sc.resolve_session_command("/STOP") == sc.InjectAction(kind="key", payload="esc")
+
+
+def test_session_usage_unknown_command():
+    assert "未知" in sc.session_usage("/bogus")

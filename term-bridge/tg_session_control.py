@@ -21,6 +21,11 @@ EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max", "auto
 
 
 def resolve_session_command(cmd: str, arg: str = "") -> InjectAction | None:
+    """Resolve a session command to an inject action.
+
+    Command and arg are matched case-insensitively (trimmed + lowercased);
+    the emitted payload uses the canonical lowercase form.
+    """
     cmd = cmd.strip().lower()
     arg = arg.strip().lower()
     if cmd == "/stop":
