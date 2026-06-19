@@ -13,6 +13,16 @@
 #   ./oneClickSetup.sh --test               # 安装后跑冒烟测试
 #   ./oneClickSetup.sh --skip-check         # 跳过结尾的 ./mob check
 #   所有未识别参数都会原样透传给 ./mob setup（见 ./mob setup --help）
+
+# ── 确保以真正的 bash 运行 ──
+# 本脚本依赖 bash 特性（数组、进程替换、[[ ]] 等）。若被 sh/dash 调用，
+# 或被 bash 的 POSIX 模式（即以 `sh oneClickSetup.sh` 形式）调用，
+# 自动用真正的 bash 重新执行，避免 "syntax error near unexpected token" 等问题。
+case "${BASH_VERSION:-}:${SHELLOPTS:-}" in
+  :*)        exec bash "$0" "$@" ;;   # 无 BASH_VERSION → 非 bash（sh/dash）
+  *:*posix*) exec bash "$0" "$@" ;;   # bash 处于 POSIX 模式（被当作 sh 调用）
+esac
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

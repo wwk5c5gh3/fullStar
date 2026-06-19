@@ -11,7 +11,7 @@ TOKEN=""
 CHAT_ID=""
 RUN_TEST=0
 INTERACTIVE=1
-FETCH_CHAT_ID=0
+FETCH_CHAT_ID=1          # 默认自动抓取 chat_id；用 --no-fetch-chat-id 关闭
 INSTALL_RELAY_DEPS=1
 
 usage() {
@@ -22,12 +22,17 @@ One-click configure TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in mobile-agent/.env
 
 Options:
   --token TOKEN          Bot token from @BotFather (skip prompt)
-  --chat-id ID           Your Telegram chat id (skip prompt)
-  --fetch-chat-id        Auto-fetch chat_id via getUpdates (send /start to bot first)
+  --chat-id ID           Your Telegram chat id (skip auto-fetch)
+  --fetch-chat-id        Auto-fetch chat_id via getUpdates (default; kept for compat)
+  --no-fetch-chat-id     Disable auto-fetch; prompt to type chat_id manually
   --test                 Send a test message after setup
   --non-interactive      Fail if token missing instead of prompting
   --no-relay-deps        Skip pip install python-telegram-bot (for tg-start)
   -h, --help             Show help
+
+By default, after the token is set this script auto-fetches your chat_id via
+getUpdates. If the bot has no messages yet, it tells you to send /start and
+retries — you never need to paste the chat_id manually.
 
 Examples:
   ./tg-relay/setup-telegram.sh
@@ -50,6 +55,20 @@ write_env() {
   else
     echo "${key}=${val}" >> "$file"
   fi
+}
+
+get_bot_username() {
+  local token="$1"
+  python3 - "$token" <<'PY'
+import json, sys, urllib.request
+token = sys.argv[1]
+try:
+    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getMe", timeout=15) as r:
+        data = json.load(r)
+    print(data.get("result", {}).get("username", "") if data.get("ok") else "")
+except Exception:
+    print("")
+PY
 }
 
 fetch_chat_id() {
@@ -87,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --token) TOKEN="${2:-}"; shift 2 ;;
     --chat-id) CHAT_ID="${2:-}"; shift 2 ;;
     --fetch-chat-id) FETCH_CHAT_ID=1; shift ;;
+    --no-fetch-chat-id) FETCH_CHAT_ID=0; shift ;;
     --test) RUN_TEST=1; shift ;;
     --non-interactive) INTERACTIVE=0; shift ;;
     --no-relay-deps) INSTALL_RELAY_DEPS=0; shift ;;
@@ -150,20 +170,67 @@ fi
 
 write_env "TELEGRAM_BOT_TOKEN" "$TOKEN" "$ENV_FILE"
 
-if [[ "$FETCH_CHAT_ID" -eq 1 ]]; then
-  echo "▶ Fetching chat_id (send /start to your bot if empty)..."
-  CHAT_ID="$(fetch_chat_id "$TOKEN")" || true
-  if [[ -n "$CHAT_ID" ]]; then
-    echo "  found chat_id: $CHAT_ID"
-  fi
+# bot 自身 id = token 冒号前部分；用于识别"把 chat_id 误填成 bot 自己"的情况
+BOT_ID="${TOKEN%%:*}"
+BOT_USERNAME="$(get_bot_username "$TOKEN")"
+BOT_LABEL="${BOT_USERNAME:+@$BOT_USERNAME}"; BOT_LABEL="${BOT_LABEL:-你的 bot}"
+
+# 已有的 chat_id 若等于 bot 自身 id（无法给自己发消息），视为无效，强制重新获取
+if [[ -n "$CHAT_ID" && "$CHAT_ID" == "$BOT_ID" ]]; then
+  echo "  ! 现有 TELEGRAM_CHAT_ID 等于 bot 自身 id（bot 不能给自己发消息），将重新获取"
+  CHAT_ID=""
 fi
 
-if [[ -z "$CHAT_ID" && "$INTERACTIVE" -eq 1 ]]; then
+# 自动获取 chat_id（默认开启）：抓不到就提示发 /start 并重试，无需手动粘贴
+if [[ -z "$CHAT_ID" && "$FETCH_CHAT_ID" -eq 1 ]]; then
+  echo "▶ 自动获取 chat_id"
+  while :; do
+    CHAT_ID="$(fetch_chat_id "$TOKEN" 2>/dev/null)" || true
+    if [[ -n "$CHAT_ID" ]]; then
+      echo "  ✓ 已获取 chat_id: $CHAT_ID"
+      break
+    fi
+    if [[ "$INTERACTIVE" -ne 1 ]]; then
+      echo "  ! 未获取到 chat_id —— 请先在 Telegram 给 $BOT_LABEL 发送 /start，再重跑" >&2
+      break
+    fi
+    echo ""
+    echo "  ▶ 请在 Telegram 打开 $BOT_LABEL 并发送 /start（或任意消息）"
+    echo "    然后直接按【回车】即可自动获取 —— 不要粘贴 token！"
+    read -r -p "     [回车]=自动获取  s=跳过  (chat_id 是纯数字，一般无需手填): " ans
+    ans="${ans// /}"
+    case "$ans" in
+      s|S|skip) CHAT_ID=""; break ;;
+      "")       : ;;                                   # 回车 → 重试
+      *:*)      echo "  ✗ 你粘贴的是 bot token，不是 chat_id。请改为给 $BOT_LABEL 发 /start 后按回车。" ;;
+      *)
+        if [[ "$ans" =~ ^-?[0-9]+$ ]]; then
+          CHAT_ID="$ans"; echo "  使用手动输入: $CHAT_ID"; break
+        else
+          echo "  ✗ chat_id 必须是纯数字（群组为负数）。请重试或按回车自动获取。"
+        fi
+        ;;
+    esac
+  done
+fi
+
+# 关闭了自动获取（--no-fetch-chat-id）时，回退到手动输入
+if [[ -z "$CHAT_ID" && "$FETCH_CHAT_ID" -ne 1 && "$INTERACTIVE" -eq 1 ]]; then
   echo ""
   echo "  Get chat_id: message your bot, then visit:"
   echo "  https://api.telegram.org/bot<TOKEN>/getUpdates"
-  echo "  Or re-run: ./tg-relay/setup-telegram.sh --fetch-chat-id"
   read -r -p "  TELEGRAM_CHAT_ID (Enter to skip): " CHAT_ID
+fi
+
+# 最终校验：chat_id 必须是纯数字、且不等于 bot 自身 id（拒绝误填 token / 非数字）
+if [[ -n "$CHAT_ID" ]]; then
+  if [[ ! "$CHAT_ID" =~ ^-?[0-9]+$ ]]; then
+    echo "  ✗ chat_id 非法（应为纯数字，疑似误填 token）—— 已忽略，不写入" >&2
+    CHAT_ID=""
+  elif [[ "$CHAT_ID" == "$BOT_ID" ]]; then
+    echo "  ✗ chat_id 不能等于 bot 自身 id（$BOT_ID）—— 已忽略，不写入" >&2
+    CHAT_ID=""
+  fi
 fi
 
 if [[ -n "$CHAT_ID" ]]; then

@@ -42,6 +42,9 @@ case "$cmd" in
   tg-setup|setup-telegram|setup-tg)
     exec "$ROOT/tg-relay/setup-telegram.sh" "$@"
     ;;
+  tg-chatid|tg-chat-id|get-chat-id)
+    exec "$ROOT/tg-relay/get-chat-id.sh" "$@"
+    ;;
   tg-inbox)
     exec cat "$ROOT/inbox/pending.txt" 2>/dev/null || echo "(inbox empty)"
     ;;
@@ -104,6 +107,7 @@ mob-remote extras:
   up             Start full TG stack (tg-relay + term-bridge monitor)
   down           Stop full TG stack
   tg-setup       One-click Telegram token + chat_id setup (--test)
+  tg-chatid      Auto-fetch & write TELEGRAM_CHAT_ID (token must be set; --test)
   tg-start       Start tg-relay only (singleton daemon)
   tg-stop        Stop tg-relay only
   tg-restart     Stop duplicates and restart tg-relay daemon
