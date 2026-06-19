@@ -15,6 +15,11 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("format", "设置回传格式"),
     ("devices", "列出设备"),
     ("check", "环境检查"),
+    ("stop", "停止当前运行"),
+    ("reset", "重置当前会话"),
+    ("compact", "压缩会话上下文"),
+    ("model", "查看或切换模型"),
+    ("think", "设置思考强度"),
     ("help", "显示可用命令"),
 ]
 
@@ -27,6 +32,20 @@ SUBMENUS: dict[str, list[tuple[str, str]]] = {
         ("screenshot", "fmt:screenshot"),
     ],
     "/shot": [("android", "shot:android"), ("ios", "shot:ios")],
+    "/model": [
+        ("opus", "model:opus"),
+        ("sonnet", "model:sonnet"),
+        ("haiku", "model:haiku"),
+        ("fable", "model:fable"),
+    ],
+    "/think": [
+        ("low", "think:low"),
+        ("medium", "think:medium"),
+        ("high", "think:high"),
+        ("xhigh", "think:xhigh"),
+        ("max", "think:max"),
+        ("auto", "think:auto"),
+    ],
 }
 
 # callback action prefix → slash command base

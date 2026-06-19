@@ -44,6 +44,24 @@ def _inject_iterm(text: str, target=None) -> tuple[int, str]:
         return 1, str(e)
 
 
+def _inject_key(key: str, target=None) -> tuple[int, str]:
+    t = target or resolve_target()
+    cmd = [sys.executable, str(term_backend.inject_script())]
+    if t.window is None:
+        cmd.append("--front-window")
+    else:
+        cmd.extend(["--window", str(t.window)])
+    cmd.extend(["--tab", str(t.tab), "--key", key])
+    try:
+        r = subprocess.run(
+            cmd, cwd=ROOT, capture_output=True, text=True, timeout=30,
+            env=apply_target_env(t), stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return 1, str(e)
+    return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+
+
 def _schedule_iterm_monitor_poll(target=None) -> None:
     delay = os.environ.get("TG_ITERM_MONITOR_AFTER", "").strip()
     if not delay or delay.lower() in ("0", "false", "no", "off"):
@@ -141,7 +159,8 @@ def apply(mod: ModuleType) -> None:
                 "/devices — list devices\n"
                 "/tabs — list iTerm tabs + routing hints\n"
                 "/new claude|codex [prompt] — 新 tab 启动 agent 会话\n"
-                "/format html|markdown|plain|screenshot — 回传格式\n\n"
+                "/format html|markdown|plain|screenshot — 回传格式\n"
+                "/stop /reset /compact /model /think — 控制当前会话\n\n"
                 "Natural language -> iTerm + inbox\n"
                 "  Prefix examples:\n"
                 "  [t2] question — tab 2\n"
@@ -173,6 +192,21 @@ def apply(mod: ModuleType) -> None:
             )
             os.environ.update(retarget_env(new_tab))
             return reply
+        if cmd in ("/stop", "/reset", "/compact", "/model", "/think"):
+            from tg_session_control import resolve_session_command, session_usage
+            arg = parts[1] if len(parts) > 1 else ""
+            action = resolve_session_command(cmd, arg)
+            if action is None:
+                return session_usage(cmd)
+            if sys.platform != "darwin":
+                return "会话控制需要 macOS"
+            if action.kind == "key":
+                code, out = _inject_key(action.payload)
+            else:
+                code, out = _inject_iterm(action.payload, target=resolve_target())
+            if code == 0:
+                return f"✓ 已发送 {cmd} → {action.payload}"
+            return f"会话控制失败:\n{out[:800]}"
         return orig_cmd(text)
 
     mod._handle_natural_language = handle_natural_language
