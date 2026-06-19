@@ -41,3 +41,5 @@ def test_applescript_opens_tab_and_returns_tabcount():
     assert "count of tabs of front window" in script
     assert 'do script "' in script  # new-window path present
     assert 'in front window' in script  # existing-window path present
+    esc = lib.build_spawn_applescript(script_path="/tmp/it's.sh")
+    assert "bash '/tmp/it'\\''s.sh'" in esc  # path is shell-quoted, not embedded raw
