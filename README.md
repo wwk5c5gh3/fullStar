@@ -8,10 +8,13 @@
 > **远程驱动 Claude Code / Codex** → [可视化说明页](docs/TG_ITERM_AI_FLOW.html) · [docs/ITERM_MULTI_TAB.md](docs/ITERM_MULTI_TAB.md)  
 > **依赖与安装** → [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) · [docs/INSTALL.md](docs/INSTALL.md)
 
-## 远程驱动 Claude Code / Codex（iTerm 注入回传）
+## 远程驱动 Claude Code / Codex（Terminal/iTerm 注入回传）
 
 把 Telegram 当成「AI 编程助手的遥控器」：手机发一句话 → 自动注入到 Mac 上某个正在跑
-**Claude Code / Codex** 的 iTerm2 标签页 → AI 执行 → 助手回复自动回传 Telegram。人不在电脑前也能隔空指挥多个项目的 AI 会话。
+**Claude Code / Codex** 的终端标签页 → AI 执行 → 助手回复自动回传 Telegram。人不在电脑前也能隔空指挥多个项目的 AI 会话。
+
+> **终端后端可选**：`.env` 的 `TG_TERM_BACKEND` 选择注入/捕获后端，默认 `terminal`
+> （系统自带 Terminal.app），也可设 `iterm` 使用 iTerm2。注入、截图、回传脚本各有两套实现，由 `term_backend.py` 统一切换。
 
 ![Telegram → iTerm2 Claude Code/Codex 流程图](docs/tg-iterm-flow.svg)
 
@@ -48,13 +51,27 @@
 
 ```bash
 # .env
-TG_RELAY_ITERM_INJECT=1      # 自然语言 → 注入 iTerm
+TG_RELAY_ITERM_INJECT=1      # 自然语言 → 注入终端
+TG_TERM_BACKEND=terminal     # 终端后端：terminal(默认, 系统自带 Terminal.app) | iterm
 TG_ITERM_MONITOR_AFTER=45    # 注入后多久开始抓取回传
 
 ./mob iterm-buffer-setup     # 增大滚动缓冲，避免长回复被截断（一次）
 ./mob iterm-list             # 查看 tab 序号 / 推荐前缀
 ./mob up                     # 同时启动 tg-relay（收）+ iterm-monitor（回传）
 ```
+
+### 手机一句话开新会话：`/new`
+
+不必先在电脑上开好终端——手机发 `/new` 即可在新标签页里起一个全新 AI 会话：
+
+```
+/new claude 修复登录的 bug      # 新建 Terminal 标签 → 在 ~/fullStar/<时间戳> 里启动 claude，并把这句话作为首个 prompt
+/new codex                      # 同理，启动 codex（不带 prompt）
+```
+
+会自动：新建标签页（无窗口则新建窗口）→ `mkdir` 一个带时间戳的工作目录 → 若未安装对应 CLI 则
+先自动安装 → 启动 agent（`claude --permission-mode bypassPermissions` / `codex`）。开完会话后，
+后续普通消息会自动注入到这个新标签页。
 
 > 完整说明：**[可视化流程说明页](docs/TG_ITERM_AI_FLOW.html)**（架构图 + 消息生命周期 + 完成判定） ·
 > **[docs/ITERM_MULTI_TAB.md](docs/ITERM_MULTI_TAB.md)**（多 tab 路由指南）。手机发 `/tabs` 可让 Bot 列出当前所有标签页。
@@ -152,6 +169,9 @@ Agent 按 `SKILL.md` 中的 vision loop 操作设备并回传结果。
 
 | 命令 | 作用 |
 |------|------|
+| `/new claude\|codex [prompt]` | 新标签页起一个全新 AI 会话（见上） |
+| `/tabs` | 列出当前终端标签页 + 路由提示 |
+| `/format html\|markdown\|plain\|screenshot` | 设置回传格式（即时生效，无需重启） |
 | `/shot android` | Android 截图 → TG |
 | `/shot ios` | iOS 截图 → TG |
 | `/tap 540 1200` | 点击（默认 Android） |
@@ -159,7 +179,7 @@ Agent 按 `SKILL.md` 中的 vision loop 操作设备并回传结果。
 | `/swipe x1 y1 x2 y2` | 滑动 |
 | `/check` | 环境检查 |
 | `/devices` | 列出设备 |
-| 自然语言 | 写入 `inbox/pending.txt`，供本地 Agent 处理 |
+| 自然语言 | 注入当前目标标签页（或写入 `inbox/pending.txt`） |
 
 查看待办：`./mob tg-inbox`
 
