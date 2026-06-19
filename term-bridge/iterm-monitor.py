@@ -20,6 +20,7 @@ from iterm_extract import (  # noqa: E402
     normalize_for_stable_compare,
     should_text_fallback,
 )
+from interactive_prompt import detect_select_prompt, should_auto_default  # noqa: E402
 from iterm_target import resolve_target  # noqa: E402
 from tg_format import format_reply, strip_terminal_noise  # noqa: E402
 from tg_format_config import get_format  # noqa: E402
@@ -156,6 +157,50 @@ def _text_fallback_seconds() -> float:
         return max(0.0, float(raw))
     except ValueError:
         return 90.0
+
+
+def _auto_default_seconds() -> float:
+    """Auto-press Enter on a stuck select-prompt after this long. Env
+    TG_ITERM_MONITOR_AUTO_DEFAULT (default 60, 0/off disables)."""
+    raw = os.environ.get("TG_ITERM_MONITOR_AUTO_DEFAULT", "60").strip()
+    if raw.lower() in ("", "0", "false", "no", "off"):
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 60.0
+
+
+def _auto_default_caption() -> str:
+    return os.environ.get(
+        "TG_ITERM_AUTO_DEFAULT_CAPTION", "⏱ 1 分钟未选择，已默认选择第一项"
+    ).strip() or "⏱ 已默认选择第一项"
+
+
+def _read_auto_default_mark() -> str:
+    p = _monitor_file("auto-default-mark")
+    return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+def _write_auto_default_mark(key: str) -> None:
+    p = _monitor_file("auto-default-mark")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(key, encoding="utf-8")
+
+
+def _inject_key(key: str) -> tuple[int, str]:
+    cmd = [sys.executable, str(term_backend.inject_script()), "--key", key]
+    t = resolve_target()
+    if t.window is None:
+        cmd.append("--front-window")
+    else:
+        cmd.extend(["--window", str(t.window)])
+    cmd.extend(["--tab", str(t.tab)])
+    r = subprocess.run(
+        cmd, cwd=ROOT, capture_output=True, text=True, timeout=30,
+        env=os.environ.copy(), stdin=subprocess.DEVNULL,
+    )
+    return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
 def _screenshot_marked_for_turn(sent_at: float) -> bool:
@@ -295,6 +340,7 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
     stable_polls = max(1, int(os.environ.get("TG_ITERM_MONITOR_STABLE_POLLS", "2")))
     screenshot_idle = _screenshot_idle_seconds()
     text_fallback = _text_fallback_seconds()
+    auto_default = _auto_default_seconds()
     target = resolve_target()
     print(
         f"iterm-monitor: @landpage_ipa_addr_bot private chat_id={chat_id} "
@@ -306,6 +352,7 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
     last_capture = ""
     last_stable = ""
     stable_count = 0
+    stable_since = time.time()
     last_seen_reply = _read_last_sent()
     last_extract_change_at = _read_last_sent_at() or time.time()
     while True:
@@ -325,6 +372,7 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
             last_capture = current
             last_stable = stable_key
             stable_count = 0
+            stable_since = time.time()
             _write_state(current)
         else:
             stable_count += 1
@@ -390,6 +438,23 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
                     else:
                         print(f"[{ts}] screenshot error: {shot_msg}", flush=True)
 
+        if auto_default > 0:
+            is_prompt = detect_select_prompt(current)
+            if should_auto_default(
+                is_prompt=is_prompt,
+                stable_elapsed=time.time() - stable_since,
+                threshold=auto_default,
+                stable_key=stable_key,
+                last_fired_key=_read_auto_default_mark(),
+            ):
+                k_code, k_msg = _inject_key("enter")
+                if k_code == 0:
+                    _write_auto_default_mark(stable_key)
+                    _send_tg(_auto_default_caption(), "plain")
+                    print(f"[{ts}] auto-default: pressed enter ({k_msg})", flush=True)
+                else:
+                    print(f"[{ts}] auto-default error: {k_msg}", flush=True)
+
         if once:
             return 0
         time.sleep(interval)
@@ -406,7 +471,7 @@ def main() -> int:
 
     if args.reset:
         from iterm_log_buffer import reset as reset_log_buffer
-        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark"):
+        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark"):
             p = _monitor_file(kind)
             if p.is_file():
                 p.unlink()
