@@ -101,18 +101,19 @@ class InjectAction:
 
 | command | InjectAction | notes |
 |---------|--------------|-------|
-| `/stop` | key `esc` | interrupt current run (Esc); uses the `--key esc` inject mode |
+| `/stop` | key `esc` | interrupt current run — exactly ONE Esc (two = rewind); uses `--key esc` |
 | `/reset` | text `/clear` | Claude Code clear-conversation command |
 | `/compact` | text `/compact` | Claude Code compact command |
 | `/model <name>` | text `/model <name>` | from button or typed arg; bare `/model` shows buttons |
-| `/think <level>` | see below | thinking-intensity |
+| `/think <level>` | text `/effort <level>` | session thinking-intensity (see below) |
 
-`/think` semantics: Claude Code has no `/think` slash command — thinking is
-driven by prompt keywords ("think" / "think hard" / "ultrathink"). So `/think
-<level>` sets a relay-side **prefix state** (stored like the `/format` state)
-that is prepended to subsequent natural-language injects: `normal` → no prefix,
-`think` → `think. `, `hard` → `think hard. `, `ultra` → `ultrathink. `. Bare
-`/think` shows the buttons.
+`/think` semantics (verified 2026-06-19 via claude-code-guide): Claude Code has
+no `/think` slash command, and "think"/"think hard" are NOT recognized keywords.
+Session-level reasoning depth is set by **`/effort <level>`** where level ∈
+`low | medium | high | xhigh | max | auto`. So our `/think <level>` command
+injects `/effort <level>` directly (no relay-side prefix state). Bare `/think`
+shows the level buttons. (The only per-turn keyword is `ultrathink`, out of
+scope here.)
 
 The relay executes a text `InjectAction` via the existing inject path
 (`term_backend.inject_script()` with the text + Enter) and a key `InjectAction`
