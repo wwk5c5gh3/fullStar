@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "term-bridge"))
 from iterm_extract import (  # noqa: E402
     extract_latest_reply,
     is_reply_complete,
+    new_content_since,
     normalize_for_stable_compare,
 )
 from iterm_target import resolve_target  # noqa: E402
@@ -228,6 +229,12 @@ def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
     if not force and reply == last_sent:
         return 0, "already sent"
 
+    # Strip any leading block already delivered in the previous message so the
+    # same text isn't repeated (streaming progress sends / verbatim re-sends).
+    to_send = reply if force else new_content_since(reply, last_sent)
+    if not to_send.strip():
+        return 0, "already sent"
+
     fmt = _output_format()
     if fmt == "screenshot":
         # New reply detected → send an iTerm screenshot instead of text.
@@ -235,11 +242,11 @@ def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
         if code != 0:
             # Screenshot failed (e.g. macOS Automation/Screen-Recording perms)
             # → fall back to text so the reply is never lost.
-            t_code, t_msg = _send_tg(reply, "html")
+            t_code, t_msg = _send_tg(to_send, "html")
             if t_code == 0:
                 code, msg = 0, f"screenshot failed → sent text ({msg})"
     else:
-        code, msg = _send_tg(reply, fmt)
+        code, msg = _send_tg(to_send, fmt)
     if code == 0:
         _write_last_sent(reply)
         _write_last_sent_at(time.time())

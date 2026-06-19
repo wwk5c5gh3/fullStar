@@ -160,6 +160,51 @@ def normalize_for_stable_compare(text: str) -> str:
     return "\n".join(kept)
 
 
+def _norm_line(line: str) -> str:
+    """Collapse internal whitespace so terminal re-wrapping doesn't defeat compare."""
+    return re.sub(r"\s+", " ", line.strip())
+
+
+def new_content_since(reply: str, last_sent: str) -> str:
+    """Return only the part of `reply` not already covered by `last_sent`.
+
+    Guards against duplicate Telegram messages where a later capture repeats an
+    earlier (partial) send as its leading block — e.g. a mid-stream send followed
+    by the completed turn, or a verbatim re-send. Comparison is line-based on
+    normalized non-blank lines, so whitespace/wrapping differences don't matter.
+
+    Only strips when `last_sent` is fully a leading block of `reply` (the precise
+    "repeats the previous message" case); an otherwise-different reply is returned
+    unchanged. Returns "" when `reply` adds nothing beyond `last_sent`.
+    """
+    if not last_sent.strip() or not reply.strip():
+        return reply
+
+    prev = [_norm_line(l) for l in last_sent.splitlines() if l.strip()]
+    if not prev:
+        return reply
+
+    cur_raw = reply.splitlines()
+    cur_norm = [_norm_line(l) for l in cur_raw if l.strip()]
+    n = len(prev)
+    if len(cur_norm) < n or cur_norm[:n] != prev:
+        return reply  # not a continuation of the previous send → keep full reply
+
+    # Drop the first n non-blank lines (the repeated block) from the original text.
+    seen = 0
+    idx = 0
+    while idx < len(cur_raw) and seen < n:
+        if cur_raw[idx].strip():
+            seen += 1
+        idx += 1
+    tail = cur_raw[idx:]
+    while tail and not tail[0].strip():
+        tail.pop(0)
+    while tail and not tail[-1].strip():
+        tail.pop()
+    return "\n".join(tail).strip()
+
+
 def _extract_after_crunched(lines: list[str]) -> str:
     crunch_idx = -1
     for i in range(len(lines) - 1, -1, -1):
