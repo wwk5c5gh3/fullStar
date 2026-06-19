@@ -113,7 +113,7 @@ def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Paste text into a Terminal.app window/tab")
+    parser = argparse.ArgumentParser(description="Paste text or press a key (--key) in a Terminal.app window/tab")
     parser.add_argument("text", nargs="?", help="Text to inject (or stdin)")
     parser.add_argument("--window", type=int, help="Window index (1-based); omit with --front-window")
     parser.add_argument("--front-window", action="store_true", help="Use frontmost Terminal window")

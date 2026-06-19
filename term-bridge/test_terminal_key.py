@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import terminal_inject_lib as lib
 
 CLI = Path(__file__).resolve().parent / "terminal-inject.py"
@@ -19,6 +21,12 @@ def test_key_script_enter_uses_keystroke_return():
 def test_key_script_esc_uses_key_code_53():
     s = lib.build_key_script(window=None, tab=1, key="esc")
     assert "key code 53" in s
+    assert "tab 1" in s
+
+
+def test_key_script_unknown_key_raises():
+    with pytest.raises(ValueError):
+        lib.build_key_script(window=1, tab=1, key="tab")
 
 
 def test_cli_dry_run_key_enter():
