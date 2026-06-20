@@ -10,6 +10,11 @@ ITERM_PIDFILE="$ROOT/inbox/iterm-monitor-daemon.pid"
 ITERM_LOG="$ROOT/inbox/iterm-monitor.log"
 ENV_FILE="$ROOT/.env"
 
+# iterm-monitor 看护：崩溃自动重启 + 防爆（窗口内重启过多则停手）
+MON_RESTART_DELAY="${TG_MONITOR_RESTART_DELAY:-3}"
+MON_MAX_BURST="${TG_MONITOR_MAX_BURST:-10}"
+MON_BURST_WINDOW="${TG_MONITOR_BURST_WINDOW:-60}"
+
 mkdir -p "$ROOT/inbox"
 
 usage() {
@@ -98,18 +103,21 @@ start_monitor() {
     return 1
   fi
 
-  echo "▶ iterm-monitor daemon (background)"
-  nohup python3 "$ITERM_MONITOR" >>"$ITERM_LOG" 2>&1 </dev/null &
-  local mpid=$!
+  echo "▶ iterm-monitor daemon (background, auto-restart)"
+  # 后台拉起看护循环（自身崩溃/被杀后自动重启 python）
+  nohup "$0" _monitor-loop >>"$ITERM_LOG" 2>&1 </dev/null &
   disown 2>/dev/null || true
-  echo "$mpid" >"$ITERM_PIDFILE"
 
   local waited=0
   while (( waited < 20 )); do
-    if kill -0 "$mpid" 2>/dev/null; then
-      echo "  ✓ iterm-monitor pid=$mpid"
-      echo "  log: $ITERM_LOG"
-      return 0
+    if [[ -f "$ITERM_PIDFILE" ]]; then
+      local dpid
+      dpid="$(cat "$ITERM_PIDFILE" 2>/dev/null || true)"
+      if [[ -n "${dpid:-}" ]] && kill -0 "$dpid" 2>/dev/null; then
+        echo "  ✓ iterm-monitor supervisor pid=$dpid"
+        echo "  log: $ITERM_LOG"
+        return 0
+      fi
     fi
     sleep 0.25
     waited=$((waited + 1))
@@ -118,6 +126,40 @@ start_monitor() {
   echo "  ✗ iterm-monitor failed to start — see $ITERM_LOG" >&2
   rm -f "$ITERM_PIDFILE"
   return 1
+}
+
+# 看护循环：前台运行 python，崩溃即重启；窗口内重启过多则停手（防 crash-loop 刷屏）
+run_monitor_loop() {
+  load_env
+  echo $$ >"$ITERM_PIDFILE"
+  trap 'rm -f "$ITERM_PIDFILE"; exit 0' SIGTERM SIGINT
+
+  local restarts=0 window_start
+  window_start=$(date +%s)
+
+  while true; do
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] starting iterm-monitor (supervisor pid $$)"
+    set +e
+    python3 "$ITERM_MONITOR"
+    local code=$?
+    set -e
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] iterm-monitor exited code=$code"
+
+    local now
+    now=$(date +%s)
+    if (( now - window_start > MON_BURST_WINDOW )); then
+      restarts=0
+      window_start=$now
+    fi
+    restarts=$((restarts + 1))
+    if (( restarts >= MON_MAX_BURST )); then
+      echo "error: iterm-monitor restarted $restarts times in ${MON_BURST_WINDOW}s — stopping" >&2
+      rm -f "$ITERM_PIDFILE"
+      exit 1
+    fi
+
+    sleep "$MON_RESTART_DELAY"
+  done
 }
 
 monitor_status() {
@@ -192,6 +234,7 @@ case "$cmd" in
   stop) stop_all ;;
   restart) stop_all; start_all ;;
   status) status_all ;;
+  _monitor-loop) run_monitor_loop ;;   # 内部：被 start_monitor 后台拉起的看护循环
   -h|--help|help) usage ;;
   *) echo "unknown command: $cmd" >&2; usage; exit 1 ;;
 esac
