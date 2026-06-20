@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Poll iTerm session output and send Claude Code assistant replies to Telegram."""
+"""Poll iTerm session output and send Claude Code assistant replies to Telegram.
+
+OUTBOUND-ONLY: this sends via `tg-notify send` (HTTP sendMessage) and never calls
+getUpdates / run_polling. So it does NOT consume Telegram updates and never
+conflicts with tg-relay (the sole updates consumer) over the shared bot token.
+"""
 from __future__ import annotations
 
 import argparse

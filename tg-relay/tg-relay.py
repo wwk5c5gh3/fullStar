@@ -109,6 +109,35 @@ def _handle_natural_language(chat_id: int, text: str) -> str:
     return "task queued — ./mob tg-inbox (set TG_RELAY_ITERM_INJECT=1 for iTerm)"
 
 
+def _parse_other_pids(pgrep_output: str, me: int) -> list[int]:
+    """PIDs from pgrep output excluding our own pid (single-instance guard)."""
+    pids: list[int] = []
+    for tok in pgrep_output.split():
+        try:
+            p = int(tok)
+        except ValueError:
+            continue
+        if p != me:
+            pids.append(p)
+    return pids
+
+
+def _other_relay_pids() -> list[int]:
+    """Other run_tg_relay.py processes on this host (excludes self).
+
+    Two relays polling the same token conflict on getUpdates (Telegram 409),
+    which also blocks tools like tg-setup from reading /start. Detect and refuse.
+    """
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "run_tg_relay.py"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return []
+    return _parse_other_pids(out, os.getpid())
+
+
 def _parse_tap(args: list[str]) -> tuple[str, int, int] | None:
     if len(args) < 2:
         return None
@@ -217,6 +246,17 @@ def main() -> int:
             print(f"[dry-run] would inject to iTerm + inbox:\n{msg}")
         return 0
 
+    # Single-instance guard: a second relay polling the same token gets a
+    # getUpdates 409 and silently steals updates. Refuse instead.
+    others = _other_relay_pids()
+    if others:
+        print(
+            f"ERROR: another tg-relay is already running (pid {others[0]}). "
+            "Two pollers conflict on getUpdates (409) — run ./mob tg-stop first.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         from telegram import (
             BotCommand,
@@ -231,6 +271,7 @@ def main() -> int:
             MessageHandler,
             filters,
         )
+        from telegram.error import Conflict
     except ImportError:
         print("pip install python-telegram-bot", file=sys.stderr)
         return 1
@@ -330,7 +371,17 @@ def main() -> int:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_handler(MessageHandler(filters.COMMAND, on_message))
     print(f"mobile-agent tg-relay listening (root={ROOT})")
-    app.run_polling(allowed_updates=["message", "callback_query"])
+    try:
+        app.run_polling(allowed_updates=["message", "callback_query"])
+    except Conflict:
+        # Another consumer is polling the same token. Exit clearly so the
+        # supervisor's burst-limit stops the loop instead of crash-spamming.
+        print(
+            "ERROR: getUpdates 409 Conflict — another instance is consuming "
+            "updates. Run ./mob tg-stop, then restart.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

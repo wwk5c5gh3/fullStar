@@ -50,11 +50,14 @@
 - **做法**：优先覆盖 `_handle_command` 分发、`iterm_route` 路由、注入脚本 `--dry-run`、`iterm_extract` 提取。
 - **验收**：核心模块行覆盖 ≥ 60%。
 
-#### T4. 两 bot 抢同一 token —— 明确单实例约束
-- **问题**：relay 与 iterm-monitor 都 `run_polling`，Telegram 每条消息只投一个消费者，无互斥。
-- **位置**：`tg-relay.py`、`iterm-monitor.py:60`
-- **做法**：monitor 不再 `run_polling`（仅出站发送);或文档化「relay 收、monitor 只发」并加 PID 互斥检查。
-- **验收**：两者同跑时不丢消息;启动有冲突检测。
+#### ✅ T4. 单实例约束 / getUpdates 冲突 — 完成
+- **澄清**：review 称「两 bot 都 run_polling」**不准确** —— iterm-monitor 是**出站-only**（`tg-notify send`，不调 getUpdates/run_polling），relay 是唯一 updates 消费者。真实风险是**多个 relay 实例**抢同一 token（409，也是早期 tg-setup 抓不到 /start 的根因）。
+- **实现**：
+  - `tg-relay.py`：启动单实例守卫 `_other_relay_pids()`（pgrep 检测已有 relay，排除自身）→ 明确拒绝启动。
+  - `run_polling` 捕获 `telegram.error.Conflict`（409）→ 清晰提示并退出（让看护防爆停而非崩溃刷屏）。
+  - `iterm-monitor.py`：docstring 标注「出站-only，永不消费 updates」。
+- **测试**：`test_relay_singleton.py`（3 项）。term-bridge 283 passed。
+- **验收**：✅ 第二个 relay 启动被拒（实测报 pid 冲突）。
 
 ### P2 — 中优先
 
