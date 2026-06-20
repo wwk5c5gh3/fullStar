@@ -35,11 +35,17 @@ def parse_state(raw: str) -> ItermTarget | None:
     window = data.get("window")
     if window is not None and (not isinstance(window, int) or isinstance(window, bool) or window < 1):
         return None
-    return ItermTarget(window=window, tab=tab)
+    session_id = data.get("session_id")
+    if session_id is not None and not isinstance(session_id, str):
+        return None
+    return ItermTarget(window=window, tab=tab, session_id=session_id or None)
 
 
 def dump_state(t: ItermTarget) -> str:
-    return json.dumps({"window": t.window, "tab": t.tab})
+    data: dict[str, object] = {"window": t.window, "tab": t.tab}
+    if t.session_id:
+        data["session_id"] = t.session_id
+    return json.dumps(data)
 
 
 def read_default(path: Path | None = None) -> ItermTarget | None:
@@ -51,8 +57,10 @@ def read_default(path: Path | None = None) -> ItermTarget | None:
     return parse_state(raw)
 
 
-def write_default(window: int | None, tab: int, path: Path | None = None) -> ItermTarget:
-    t = ItermTarget(window=window, tab=tab)
+def write_default(
+    window: int | None, tab: int, session_id: str | None = None, path: Path | None = None
+) -> ItermTarget:
+    t = ItermTarget(window=window, tab=tab, session_id=session_id or None)
     p = path or default_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
@@ -70,4 +78,20 @@ def clear_default(path: Path | None = None) -> None:
 
 
 def current_target() -> ItermTarget:
-    return read_default() or resolve_target()
+    d = read_default()
+    if d is None:
+        return resolve_target()
+    if d.session_id:
+        # Anchor on the stable id: relocate to the session's *current* position so
+        # the monitor follows it across tab reorders; if it's gone, use .env.
+        try:
+            from iterm_route import list_tabs  # lazy: avoid import cycle
+            code, tabs = list_tabs()
+        except Exception:
+            return d
+        if code == 0 and tabs:
+            for t in tabs:
+                if t.session_id and t.session_id == d.session_id:
+                    return ItermTarget(window=t.window, tab=t.tab, session_id=t.session_id)
+            return resolve_target()
+    return d

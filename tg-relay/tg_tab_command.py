@@ -28,7 +28,7 @@ def _name(t) -> str:
 def resolve_tab_command(
     args: list[str],
     list_tabs_fn: Callable[[], tuple[int, list]],
-    write_fn: Callable[[int | None, int], object],
+    write_fn: Callable[[int | None, int, str | None], object],
     clear_fn: Callable[[], None],
 ) -> str:
     code, tabs = list_tabs_fn()
@@ -70,5 +70,5 @@ def resolve_tab_command(
             return f"序号 {n} 不存在，当前共 {len(tabs)} 个: {avail}"
         hit = tabs[n - 1]
 
-    write_fn(hit.window, hit.tab)
+    write_fn(hit.window, hit.tab, getattr(hit, "session_id", None))
     return f"✓ 默认目标已设为 {_label(hit)} ({_name(hit)})"

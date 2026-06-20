@@ -15,13 +15,16 @@ def _window_ref(window: int | None) -> str:
     return "front window" if window is None else f"window {int(window)}"
 
 
-def build_key_script(*, window: int | None, tab: int, key: str) -> str:
-    """`on run` AppleScript that focuses the target Terminal tab and presses one key."""
-    if key not in _KEY_ACTIONS:
-        raise ValueError(f"unknown key: {key!r}")
+def _focus_block(window: int | None, tab: int, session_id: str | None) -> str:
+    """AppleScript (inside `tell application "Terminal"`) that focuses the target.
+
+    When session_id (a tty like /dev/ttys003) is given, scan every window/tab for
+    the matching tty and select it — position-independent, so reordering/closing
+    other tabs can't misroute. Falls back to the positional window/tab if the tty
+    is no longer open. Without a session_id, use the positional path directly.
+    """
     win = _window_ref(window)
-    action = _KEY_ACTIONS[key]
-    focus_window = (
+    positional = (
         f"    try\n"
         f"        set index of {win} to 1\n"
         f"    end try\n"
@@ -29,6 +32,36 @@ def build_key_script(*, window: int | None, tab: int, key: str) -> str:
         f"        set selected of tab {int(tab)} of {win} to true\n"
         f"    end try\n"
     )
+    if not session_id:
+        return positional
+    tty = session_id.replace('"', '')  # tty has no quotes; strip defensively
+    return (
+        f"    set didFocus to false\n"
+        f"    repeat with aWin in windows\n"
+        f"        repeat with aTab in tabs of aWin\n"
+        f"            try\n"
+        f'                if (tty of aTab) is "{tty}" then\n'
+        f"                    set index of aWin to 1\n"
+        f"                    set selected of aTab to true\n"
+        f"                    set didFocus to true\n"
+        f"                    exit repeat\n"
+        f"                end if\n"
+        f"            end try\n"
+        f"        end repeat\n"
+        f"        if didFocus then exit repeat\n"
+        f"    end repeat\n"
+        f"    if not didFocus then\n"
+        f"{positional}"
+        f"    end if\n"
+    )
+
+
+def build_key_script(*, window: int | None, tab: int, key: str, session_id: str | None = None) -> str:
+    """`on run` AppleScript that focuses the target Terminal tab and presses one key."""
+    if key not in _KEY_ACTIONS:
+        raise ValueError(f"unknown key: {key!r}")
+    action = _KEY_ACTIONS[key]
+    focus_window = _focus_block(window, tab, session_id)
     return (
         "on run\n"
         '    if application "Terminal" is not running then error "No Terminal running"\n'
@@ -54,6 +87,7 @@ def build_inject_script(
     submit_enter: bool,
     enter_twice: bool = False,
     clear_line: bool = False,
+    session_id: str | None = None,
 ) -> str:
     """Full `on run` AppleScript for one clipboard-paste injection.
 
@@ -64,7 +98,6 @@ def build_inject_script(
     input, so a prior command never concatenates onto this one (e.g. the
     "/model sonnet/model opus" run-together bug).
     """
-    win = _window_ref(window)
     # Wipe the input line first so a stale, unsubmitted command can't concatenate.
     clear = '        keystroke "u" using control down\n        delay 0.1\n' if clear_line else ""
     # Paste is async; let it settle into the input buffer before Return submits.
@@ -74,16 +107,9 @@ def build_inject_script(
             submit += "        delay 0.25\n        keystroke return\n"
     else:
         submit = ""
-    # Best-effort focus of the requested window/tab; wrapped so a read-only
-    # property or single-window setup never aborts the paste.
-    focus_window = (
-        f"    try\n"
-        f"        set index of {win} to 1\n"
-        f"    end try\n"
-        f"    try\n"
-        f"        set selected of tab {int(tab)} of {win} to true\n"
-        f"    end try\n"
-    )
+    # Best-effort focus of the requested tab (by tty when known, else position);
+    # wrapped so a read-only property or single-window setup never aborts paste.
+    focus_window = _focus_block(window, tab, session_id)
     return (
         "on run\n"
         '    if application "Terminal" is not running then error "No Terminal running"\n'

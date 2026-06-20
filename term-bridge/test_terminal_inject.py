@@ -1,7 +1,28 @@
 """Tests for terminal_inject_lib — Terminal.app clipboard+Cmd-V inject builder."""
 from __future__ import annotations
 
-from terminal_inject_lib import build_inject_script
+from terminal_inject_lib import build_inject_script, build_key_script
+
+
+def test_session_id_focuses_by_tty_with_positional_fallback():
+    s = build_inject_script(window=2, tab=1, submit_enter=True, session_id="/dev/ttys003")
+    # scans tabs for the matching tty rather than trusting the position
+    assert 'if (tty of aTab) is "/dev/ttys003" then' in s
+    assert "set selected of aTab to true" in s
+    # positional path remains as the fallback when the tty is gone
+    assert "if not didFocus then" in s
+    assert "window 2" in s
+
+
+def test_no_session_id_uses_positional_only():
+    s = build_inject_script(window=2, tab=3, submit_enter=True)
+    assert "tty of aTab" not in s
+    assert "window 2" in s and "tab 3" in s
+
+
+def test_key_script_focuses_by_tty():
+    s = build_key_script(window=1, tab=1, key="enter", session_id="/dev/ttys000")
+    assert 'if (tty of aTab) is "/dev/ttys000" then' in s
 
 
 def test_sets_clipboard_from_injected_file():

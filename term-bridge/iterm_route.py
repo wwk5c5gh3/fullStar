@@ -32,6 +32,7 @@ class TabInfo:
     tab: int
     name: str
     sessions: int = 1
+    session_id: str | None = None  # stable id: iTerm GUID / Terminal tty
 
     @property
     def label(self) -> str:
@@ -65,7 +66,10 @@ def list_tabs() -> tuple[int, list[TabInfo]]:
     code, rows = _list_targets_for_backend()
     if code != 0:
         return code, []
-    return 0, [TabInfo(r["window"], r["tab"], r["name"], r.get("sessions", 1)) for r in rows]
+    return 0, [
+        TabInfo(r["window"], r["tab"], r["name"], r.get("sessions", 1), r.get("session_id"))
+        for r in rows
+    ]
 
 
 def _parse_aliases() -> dict[str, ItermTarget]:
@@ -128,10 +132,27 @@ def _find_by_key(tabs: list[TabInfo], key: str) -> TabInfo | None:
 
 
 def _sticky_default() -> ItermTarget:
-    """Persistent /tab default if set and still open, else the .env default."""
+    """Persistent /tab default, anchored on the stable session_id when present.
+
+    When the default carries a session_id, we look it up in the live tab list and
+    return that session's *current* window/tab — so reordering or closing other
+    tabs can't misroute. If the session_id is gone (tab closed), fall back to the
+    .env default. Without a session_id (legacy state), keep the old positional
+    presence check.
+    """
     d = read_default()
     if d is None:
         return resolve_target()
+
+    if d.session_id:
+        code, tabs = list_tabs()
+        if code != 0 or not tabs:
+            return d  # can't enumerate (e.g. non-macOS test); trust stored target
+        for t in tabs:
+            if t.session_id and t.session_id == d.session_id:
+                return ItermTarget(window=t.window, tab=t.tab, session_id=t.session_id)
+        return resolve_target()  # the anchored session is gone
+
     if d.window is not None:
         code, tabs = list_tabs()
         if code == 0 and tabs and not any(t.window == d.window and t.tab == d.tab for t in tabs):
@@ -168,12 +189,12 @@ def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
                 return default, rest, None
             hit = _find_by_tab_number(tabs, n, window=default.window)
             if hit:
-                return ItermTarget(window=hit.window, tab=hit.tab), rest, hit
+                return ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id), rest, hit
             return default, rest, None
 
         hit = _find_by_key(tabs, key)
         if hit:
-            return ItermTarget(window=hit.window, tab=hit.tab), rest, hit
+            return ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id), rest, hit
         return default, rest, None
 
     return default, body, None

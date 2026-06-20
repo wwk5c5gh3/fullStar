@@ -29,6 +29,31 @@ def test_dump_then_parse_roundtrip():
     assert td.parse_state(td.dump_state(t)) == t
 
 
+def test_parse_state_with_session_id():
+    t = td.parse_state('{"window": 2, "tab": 1, "session_id": "ABC-123"}')
+    assert t == ItermTarget(window=2, tab=1, session_id="ABC-123")
+
+
+def test_dump_omits_session_id_when_absent():
+    assert td.dump_state(ItermTarget(window=1, tab=2)) == '{"window": 1, "tab": 2}'
+
+
+def test_dump_then_parse_roundtrip_with_session_id():
+    t = ItermTarget(window=2, tab=5, session_id="/dev/ttys003")
+    assert td.parse_state(td.dump_state(t)) == t
+
+
+def test_parse_state_rejects_non_string_session_id():
+    assert td.parse_state('{"window": 1, "tab": 2, "session_id": 7}') is None
+
+
+def test_write_then_read_roundtrip_with_session_id(tmp_path):
+    p = tmp_path / "target-default.json"
+    written = td.write_default(2, 1, "GUID-9", path=p)
+    assert written == ItermTarget(window=2, tab=1, session_id="GUID-9")
+    assert td.read_default(path=p) == ItermTarget(window=2, tab=1, session_id="GUID-9")
+
+
 def test_write_then_read_roundtrip(tmp_path):
     p = tmp_path / "target-default.json"
     written = td.write_default(1, 4, path=p)

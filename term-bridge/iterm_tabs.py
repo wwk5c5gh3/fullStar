@@ -15,10 +15,11 @@ tell application "iTerm"
                 tell tab ti
                     tell current session
                         set tName to name
+                        set sId to id
                     end tell
                     set sCount to count of sessions
                 end tell
-                set out to out & w & "|||" & ti & "|||" & tName & "|||" & sCount & linefeed
+                set out to out & w & "|||" & ti & "|||" & sCount & "|||" & sId & "|||" & tName & linefeed
             end repeat
         end tell
     end repeat
@@ -42,19 +43,31 @@ def list_targets() -> tuple[int, list[dict]]:
     if r.returncode != 0:
         return r.returncode, [{"error": (r.stderr or r.stdout or "osascript failed").strip()}]
 
+    return 0, _parse(r.stdout or "")
+
+
+def _parse(stdout: str) -> list[dict]:
+    # Layout: window|||tab|||sessions|||session_id|||name  (name last → may contain |||)
     rows: list[dict] = []
-    for line in (r.stdout or "").splitlines():
+    for line in (stdout or "").splitlines():
         if not line.strip():
             continue
-        parts = line.split("|||", 3)
-        if len(parts) < 4:
+        parts = line.split("|||", 4)
+        if len(parts) < 5:
+            continue
+        try:
+            window = int(parts[0])
+            tab = int(parts[1])
+            sessions = int(parts[2])
+        except ValueError:
             continue
         rows.append(
             {
-                "window": int(parts[0]),
-                "tab": int(parts[1]),
-                "name": parts[2],
-                "sessions": int(parts[3]),
+                "window": window,
+                "tab": tab,
+                "sessions": sessions,
+                "session_id": parts[3].strip() or None,
+                "name": parts[4],
             }
         )
-    return 0, rows
+    return rows

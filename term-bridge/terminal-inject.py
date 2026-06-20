@@ -69,7 +69,7 @@ def inject(
     t = target or resolve_target()
     script = build_inject_script(
         window=t.window, tab=t.tab, submit_enter=submit_enter,
-        enter_twice=enter_twice, clear_line=clear_line,
+        enter_twice=enter_twice, clear_line=clear_line, session_id=t.session_id,
     )
 
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
@@ -104,7 +104,7 @@ def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str
         return 1, "Terminal inject requires macOS"
     _load_env()
     t = target or resolve_target()
-    script = build_key_script(window=t.window, tab=t.tab, key=key)
+    script = build_key_script(window=t.window, tab=t.tab, key=key, session_id=t.session_id)
     r = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
