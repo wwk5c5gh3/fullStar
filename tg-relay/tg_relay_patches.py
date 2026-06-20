@@ -261,6 +261,21 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
+        if cmd == "/diff":
+            from git_diff_report import format_diff_reply
+            d = parts[1] if len(parts) > 1 else str(ROOT)
+            try:
+                stat = subprocess.run(
+                    ["git", "-C", d, "diff", "--stat"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+                body = subprocess.run(
+                    ["git", "-C", d, "diff"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                return f"git diff 失败: {e}"
+            return format_diff_reply(stat, body)
         if cmd == "/p":
             from quick_prompts import load, save_prompt, delete_prompt, resolve_p_command
             reply, inject_text = resolve_p_command(

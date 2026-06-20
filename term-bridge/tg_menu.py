@@ -23,6 +23,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("model", "查看或切换模型"),
     ("think", "设置思考强度"),
     ("p", "快捷提示库（/p 名字 注入）"),
+    ("diff", "查看 git 改动（可带路径）"),
     ("help", "显示可用命令"),
 ]
 
