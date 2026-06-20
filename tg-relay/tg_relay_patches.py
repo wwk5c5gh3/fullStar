@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
 
 import term_backend
-from iterm_route import format_tabs_message, parse_routed_message
+from iterm_route import format_tabs_message, list_tabs, parse_routed_message
 from iterm_target import apply_target_env, resolve_target
 from tg_format_config import VALID as _FORMATS, get_format, set_format
 from tg_new_command import SpawnResult, retarget_env
@@ -192,6 +192,12 @@ def apply(mod: ModuleType) -> None:
             )
             os.environ.update(retarget_env(new_tab))
             return reply
+        if cmd == "/tab":
+            from tg_tab_command import resolve_tab_command
+            from target_default import write_default, clear_default
+            return resolve_tab_command(
+                parts[1:], list_tabs, write_default, clear_default
+            )
         if cmd in ("/stop", "/reset", "/compact", "/model", "/think"):
             from tg_session_control import resolve_session_command, session_usage
             arg = parts[1] if len(parts) > 1 else ""
