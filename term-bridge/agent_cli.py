@@ -5,7 +5,8 @@ constants — verify against current official docs when they change.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,18 @@ AGENTS: dict[str, AgentSpec] = {
 
 
 def get_agent(key: str) -> AgentSpec | None:
-    return AGENTS.get(key.strip().lower())
+    """Return the agent spec, with its launch command overridable via .env.
+
+    Set `AGENT_<KEY>_LAUNCH` to fully customize how the agent starts. The value
+    has spaces, so it MUST be quoted in .env (it is sourced by the daemon):
+      AGENT_CLAUDE_LAUNCH="claude --permission-mode bypassPermissions --model opus"
+      AGENT_CODEX_LAUNCH="codex --model gpt-5"
+    """
+    spec = AGENTS.get(key.strip().lower())
+    if spec is None:
+        return None
+    override = os.environ.get(f"AGENT_{spec.key.upper()}_LAUNCH", "").strip()
+    return replace(spec, launch=override) if override else spec
 
 
 def valid_keys() -> tuple[str, ...]:
