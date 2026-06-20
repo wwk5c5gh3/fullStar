@@ -84,7 +84,7 @@ def tab_submenu(tabs: list[tuple[int, int, str]]) -> list[tuple[str, str]]:
     """Inline buttons for /tab from live tabs: (window, tab, name) → (label, callback)."""
     rows: list[tuple[str, str]] = []
     for window, tab, name in tabs:
-        short = name.replace("\n", " ")[:20]
+        short = name.replace("\n", " ")[:32]
         rows.append((f"w{window}/t{tab} · {short}", f"tab:{window}:{tab}"))
     return rows
 

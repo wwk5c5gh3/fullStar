@@ -3,14 +3,16 @@
 Mirrors iterm_tabs.list_targets so the routing layer can enumerate whichever
 backend TG_TERM_BACKEND selects. Terminal.app addresses each terminal as
 `tab T of window W`; a common layout is several windows each with one tab. The
-AppleScript emits `window|||tab|||tty|||process|||title` per line, where `window`
-is the window's *stable id* (not its z-order position, which drifts as focus
-changes — so a stored target would otherwise point at the wrong window later).
-The tty (e.g. /dev/ttys003) is Terminal.app's stable per-session id, exposed as
-session_id. The title is emitted last so it may safely contain the delimiter.
+AppleScript emits `window|||tab|||tty|||process|||winName` per line, where
+`window` is the window's *stable id* (not its z-order position, which drifts as
+focus changes). winName is the window's full title bar (cwd + custom title +
+ttys + shortcut); _clean_window_name keeps the cwd + title as a stable,
+identifying name. The tty (e.g. /dev/ttys003) is the stable per-session id,
+exposed as session_id.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
@@ -24,9 +26,9 @@ tell application "Terminal"
         set tCount to count of tabs of theWin
         repeat with t from 1 to tCount
             set theTab to tab t of theWin
-            set tTitle to ""
+            set winName to ""
             try
-                set tTitle to custom title of theTab
+                set winName to name of theWin
             end try
             set proc to ""
             try
@@ -37,7 +39,7 @@ tell application "Terminal"
             try
                 set ttyStr to tty of theTab
             end try
-            set out to out & wid & "|||" & t & "|||" & ttyStr & "|||" & proc & "|||" & tTitle & linefeed
+            set out to out & wid & "|||" & t & "|||" & ttyStr & "|||" & proc & "|||" & winName & linefeed
         end repeat
     end repeat
 end tell
@@ -45,8 +47,28 @@ return out
 """
 
 
+_TTY_SEG = re.compile(r"^/?dev/ttys?\w*\d|^ttys?\w*\d", re.I)
+_SHORTCUT_SEG = re.compile(r"^[⌥⌘⌃⇧]")
+_SIZE_SEG = re.compile(r"^\d+\s*[×x]\s*\d+$")  # window size, e.g. 159×47
+
+
+def _clean_window_name(win_name: str) -> str:
+    """Window title bar → '<cwd> · <title>', dropping the ttys/shortcut tail.
+
+    Terminal.app names windows '<cwd> — <custom title> — ttysNNN — ⌥⌘N'. The cwd
+    is a stable, identifying anchor (the volatile custom title alone is not), so
+    keep the meaningful segments and drop the tty + keyboard-shortcut noise.
+    """
+    segs = [s.strip() for s in win_name.split(" — ") if s.strip()]
+    kept = [
+        s for s in segs
+        if not _TTY_SEG.match(s) and not _SHORTCUT_SEG.match(s) and not _SIZE_SEG.match(s)
+    ]
+    return " · ".join(kept)
+
+
 def _parse(stdout: str) -> list[dict]:
-    # Layout: window|||tab|||tty|||process|||title  (title last → may contain |||)
+    # Layout: window|||tab|||tty|||process|||winName  (winName last)
     rows: list[dict] = []
     for line in (stdout or "").splitlines():
         if not line.strip():
@@ -61,8 +83,7 @@ def _parse(stdout: str) -> list[dict]:
             continue
         tty = parts[2].strip()
         proc = parts[3].strip()
-        title = parts[4].strip()
-        name = title or proc or f"tab{tab}"
+        name = _clean_window_name(parts[4].strip()) or proc or f"tab{tab}"
         rows.append(
             {
                 "window": window,
