@@ -261,6 +261,19 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
+        if cmd == "/sel":
+            # interactive-prompt option button → inject the chosen number into (w,t)
+            arg = parts[1] if len(parts) > 1 else ""
+            m = re.match(r"^(\d+):(\d+):(\d+)$", arg)
+            if not m:
+                return f"无法解析选择: {arg}"
+            w, t, n = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if sys.platform != "darwin":
+                return "需要 macOS"
+            code, out = _inject_iterm(str(n), target=ItermTarget(window=w, tab=t))
+            if code == 0:
+                return f"✓ 已选择第 {n} 项"
+            return f"选择失败:\n{out[:600]}"
         if cmd == "/status":
             from agent_status import classify_state, format_status
             code, tabs = list_tabs()

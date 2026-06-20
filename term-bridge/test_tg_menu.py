@@ -82,3 +82,7 @@ def test_tab_submenu_empty_when_no_tabs():
 def test_callback_to_command_tab():
     from tg_menu import callback_to_command
     assert callback_to_command("tab", "1:3") == "/tab 1:3"
+
+
+def test_callback_to_command_sel():
+    assert m.callback_to_command("sel", "72:1:2") == "/sel 72:1:2"

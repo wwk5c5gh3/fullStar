@@ -6,7 +6,34 @@ auto-resolved by pressing Enter. The monitor loop owns the side effects.
 """
 from __future__ import annotations
 
+import re
+
 _CURSOR = "❯"
+_OPTION_RE = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$")
+
+
+def extract_select_options(capture: str) -> list[tuple[int, str]]:
+    """Parse a select menu's options as [(number, label)].
+
+    Returns the last contiguous block of `N. label` lines that starts at 1 (the
+    menu is at the bottom of the capture), so stray numbered lines higher up in
+    the scrollback don't leak in. Empty when no menu-like block is found.
+    """
+    groups: list[list[tuple[int, str]]] = []
+    cur: list[tuple[int, str]] = []
+    for line in capture.splitlines():
+        m = _OPTION_RE.match(line)
+        if m:
+            cur.append((int(m.group(1)), m.group(2).strip()))
+        elif cur:
+            groups.append(cur)
+            cur = []
+    if cur:
+        groups.append(cur)
+    for group in reversed(groups):
+        if group and group[0][0] == 1:
+            return group
+    return []
 
 
 def detect_select_prompt(capture: str) -> bool:

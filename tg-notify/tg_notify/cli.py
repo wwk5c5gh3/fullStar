@@ -1,8 +1,30 @@
 import argparse
+import json
 import sys
 
 from tg_notify.notify.sender import Notify
 from tg_notify.core.exceptions import TgkitError
+
+
+def parse_button_spec(spec_json: str) -> list[list[tuple[str, str]]]:
+    """Parse a --buttons JSON value into rows of (label, callback_data).
+
+    Accepts a flat list ``[[label, data], ...]`` (each pair is its own row) or
+    nested rows ``[[[label, data], ...], ...]``. Raises ValueError on bad input.
+    """
+    try:
+        data = json.loads(spec_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"invalid --buttons JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError("--buttons must be a JSON list")
+    rows: list[list[tuple[str, str]]] = []
+    for item in data:
+        if item and isinstance(item[0], str):  # flat [label, data] → single-button row
+            rows.append([(str(item[0]), str(item[1]))])
+        else:
+            rows.append([(str(b[0]), str(b[1])) for b in item])
+    return rows
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -56,6 +78,10 @@ def main(argv=None) -> int:
         choices=["HTML", "MarkdownV2", "Markdown"],
         help="Render text with Telegram formatting (HTML / MarkdownV2 / Markdown)",
     )
+    send_parser.add_argument(
+        "--buttons",
+        help='Inline keyboard as JSON, e.g. [["1. Yes","sel:72:1:1"],["2. No","sel:72:1:2"]]',
+    )
     _add_common_args(send_parser)
 
     shot_parser = subparsers.add_parser("screenshot", help="Capture screen and send (macOS)")
@@ -84,6 +110,16 @@ def main(argv=None) -> int:
             text_body = args.text or args.message
             if text_body:
                 extra = {"parse_mode": args.parse_mode} if args.parse_mode else {}
+                if getattr(args, "buttons", None):
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+                    rows = parse_button_spec(args.buttons)
+                    extra["reply_markup"] = InlineKeyboardMarkup(
+                        [
+                            [InlineKeyboardButton(lbl, callback_data=data) for lbl, data in row]
+                            for row in rows
+                        ]
+                    )
                 result = notifier.text(text_body, chat_id=args.chat_id, **extra)
                 print(f"sent text to chat_id={result.chat_id} message_id={result.message_id}")
             if args.photo:

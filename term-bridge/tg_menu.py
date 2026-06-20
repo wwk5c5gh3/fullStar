@@ -66,6 +66,7 @@ _ACTION_TO_CMD: dict[str, str] = {
     "model": "/model",
     "think": "/think",
     "tab": "/tab",
+    "sel": "/sel",  # interactive-prompt option button → /sel <window>:<tab>:<n>
 }
 
 

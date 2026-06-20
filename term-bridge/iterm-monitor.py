@@ -8,6 +8,7 @@ conflicts with tg-relay (the sole updates consumer) over the shared bot token.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -25,7 +26,11 @@ from iterm_extract import (  # noqa: E402
     normalize_for_stable_compare,
     should_text_fallback,
 )
-from interactive_prompt import detect_select_prompt, should_auto_default  # noqa: E402
+from interactive_prompt import (  # noqa: E402
+    detect_select_prompt,
+    extract_select_options,
+    should_auto_default,
+)
 from iterm_target import resolve_target  # noqa: E402
 from reply_dedup import append_buffer, is_duplicate, read_buffer  # noqa: E402
 from target_default import current_target  # noqa: E402
@@ -204,6 +209,17 @@ def _write_auto_default_mark(key: str) -> None:
     p.write_text(key, encoding="utf-8")
 
 
+def _read_prompt_alert_mark() -> str:
+    p = _monitor_file("prompt-alert-mark")
+    return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+def _write_prompt_alert_mark(key: str) -> None:
+    p = _monitor_file("prompt-alert-mark")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(key, encoding="utf-8")
+
+
 def _inject_key(key: str, target) -> tuple[int, str]:
     cmd = [sys.executable, str(term_backend.inject_script()), "--key", key]
     if target.window is None:
@@ -307,6 +323,24 @@ def _send_tg(text: str, fmt: str = "html") -> tuple[int, str]:
     if code == 0:
         return 0, f"sent to private chat {chat_id} plain ({out or 'ok'})"
     return code, out
+
+
+def _send_tg_buttons(text: str, buttons: list[list[str]]) -> tuple[int, str]:
+    """Send a plain message with an inline keyboard (one button per row)."""
+    token, chat_id, err = _resolve_monitor_target()
+    if err:
+        return 1, err
+    env = {**os.environ, "TELEGRAM_BOT_TOKEN": token or ""}
+    cmd = [
+        "tg-notify", "send", "--chat-id", str(chat_id),
+        "--text", text.replace("\x00", ""),
+        "--buttons", json.dumps(buttons, ensure_ascii=False),
+    ]
+    r = subprocess.run(
+        cmd, cwd=ROOT, capture_output=True, text=True, timeout=60, env=env,
+        stdin=subprocess.DEVNULL,
+    )
+    return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
 def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
@@ -479,6 +513,20 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
                     else:
                         print(f"[{ts}] screenshot error: {shot_msg}", flush=True)
 
+        # Interactive prompt → push the options as inline buttons (once per
+        # distinct prompt) so the operator picks the right one from the phone,
+        # instead of silently auto-defaulting to the first option.
+        if detect_select_prompt(current):
+            opts = extract_select_options(current)
+            if opts and _read_prompt_alert_mark() != stable_key:
+                _write_prompt_alert_mark(stable_key)
+                buttons = [
+                    [f"{n}. {label[:40]}", f"sel:{target.window}:{target.tab}:{n}"]
+                    for n, label in opts
+                ]
+                b_code, b_msg = _send_tg_buttons("⏳ Agent 在等你选择（点按钮选）:", buttons)
+                print(f"[{ts}] prompt buttons: {len(opts)} opts ({b_code} {b_msg[:50]})", flush=True)
+
         if auto_default > 0:
             is_prompt = detect_select_prompt(current)
             if should_auto_default(
@@ -512,7 +560,7 @@ def main() -> int:
 
     if args.reset:
         from iterm_log_buffer import reset as reset_log_buffer
-        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark", "shot-fp", "sent-buffer"):
+        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark", "prompt-alert-mark", "shot-fp", "sent-buffer"):
             p = _monitor_file(kind)
             if p.is_file():
                 p.unlink()
