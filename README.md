@@ -1,5 +1,9 @@
 # mob-remote
 
+**简体中文** | [English](README.en.md) | [日本語](README.ja.md)
+
+---
+
 **Telegram 远程 + Android (droid-ctl) + iOS (iphone-ctl/WDA)** 自包含封装包。
 
 可单独克隆、分发、运行，不依赖任何外部业务项目。
