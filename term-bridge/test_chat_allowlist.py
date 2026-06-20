@@ -33,9 +33,10 @@ def test_resolve_allowlist_both_empty():
     assert al.resolve_allowlist("", "") == frozenset()
 
 
-def test_is_allowed_empty_list_allows_all():
-    assert al.is_allowed(12345, frozenset()) is True
-    assert al.is_allowed(None, frozenset()) is True
+def test_is_allowed_empty_list_denies_all():
+    # Fail closed: an empty allow-list must deny everyone (no "allow all" path).
+    assert al.is_allowed(12345, frozenset()) is False
+    assert al.is_allowed(None, frozenset()) is False
 
 
 def test_is_allowed_membership():

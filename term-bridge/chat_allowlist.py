@@ -5,8 +5,10 @@ operator's live terminal, so only authorized chats should reach the handlers.
 
 Resolution: `TG_RELAY_ALLOWED_CHAT_IDS` (comma/semicolon-separated) is the
 allow-list; if unset it falls back to the owner's `TELEGRAM_CHAT_ID`. An empty
-result means "not configured" → allow all (backward compat), and the relay
-logs a warning at startup so the operator can lock it down.
+result means "not configured" → FAIL CLOSED (deny everyone). The relay refuses
+to start with an empty allow-list, so the bot never accepts arbitrary chats.
+There is intentionally no "allow all" escape hatch: this bot types into a live
+terminal running an agent with bypassed permissions.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ def resolve_allowlist(allowed_raw: str, owner_chat: str = "") -> frozenset[int]:
 
 
 def is_allowed(chat_id: int | None, allowed: frozenset[int]) -> bool:
-    """True when no allow-list is configured (empty) or chat_id is in it."""
+    """True only when chat_id is in the allow-list. Empty list = deny all (fail closed)."""
     if not allowed:
-        return True  # not configured → allow all
+        return False  # not configured → deny everyone (fail closed)
     return chat_id in allowed

@@ -52,9 +52,10 @@
 
 - 会话控制命令会键入你的实时终端，故 relay 内置 chat-id 白名单，只放行授权会话：
   - `TG_RELAY_ALLOWED_CHAT_IDS`（逗号/分号分隔）；留空则默认仅放行机主 `TELEGRAM_CHAT_ID`。
-  - 白名单与 `TELEGRAM_CHAT_ID` **都为空 → relay 拒绝启动**（fail-closed）。
-  - 如确需放行所有会话（不安全），显式设 `TG_RELAY_ALLOW_ALL_CHATS=1`。
-- 实现：`term-bridge/chat_allowlist.py`。
+  - 白名单与 `TELEGRAM_CHAT_ID` **都为空 → relay 拒绝启动**（fail-closed）。无"放行所有会话"开关。
+  - 注入护栏：剥离 C0 控制字符 + 单条上限 `TG_RELAY_MAX_INJECT_CHARS`（默认 2000）。
+  - 速率限制：每 chat 最小间隔 `TG_RELAY_MIN_INTERVAL_SECS`（默认 1s，设 0 关闭）。
+- 实现：`term-bridge/chat_allowlist.py`、`message_guard.py`、`rate_limit.py`。
 
 ## 8. Terminal.app 双向后端
 

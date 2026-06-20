@@ -6,6 +6,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from chat_allowlist import is_allowed, resolve_allowlist  # noqa: E402
 from tg_menu import MENU_COMMANDS, dispatch_callback, menu_for_command, tab_submenu  # noqa: E402
 from iterm_route import list_tabs  # noqa: E402
 from term_backend import screenshot_script  # noqa: E402
+from message_guard import sanitize_injection  # noqa: E402
+from rate_limit import RateLimiter  # noqa: E402
 
 INBOX_DIR = ROOT / "inbox"
 INBOX_FILE = INBOX_DIR / "pending.txt"
@@ -236,24 +239,18 @@ def main() -> int:
         os.environ.get("TG_RELAY_ALLOWED_CHAT_IDS", ""),
         os.environ.get("TELEGRAM_CHAT_ID", ""),
     )
-    allow_all = os.environ.get("TG_RELAY_ALLOW_ALL_CHATS", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    limiter = RateLimiter()
     if allowed:
         print(f"chat allow-list active: {sorted(allowed)}")
-    elif allow_all:
-        print(
-            "WARNING: TG_RELAY_ALLOW_ALL_CHATS set — bot accepts ALL chats; "
-            "anyone who finds the bot can drive your terminal",
-            file=sys.stderr,
-        )
+        if limiter.min_interval > 0:
+            print(f"rate limit: 1 msg / {limiter.min_interval}s per chat")
     else:
-        # Fail closed: this bot types into a live terminal, so never accept
-        # arbitrary chats by default.
+        # Fail closed: this bot types into a live terminal running an agent with
+        # bypassed permissions, so an empty allow-list must never mean "allow all".
         print(
             "ERROR: no chat allow-list — refusing to start. Set TELEGRAM_CHAT_ID "
-            "(owner) or TG_RELAY_ALLOWED_CHAT_IDS, or TG_RELAY_ALLOW_ALL_CHATS=1 "
-            "to explicitly allow all chats.",
+            "(owner) or TG_RELAY_ALLOWED_CHAT_IDS to the chat(s) allowed to drive "
+            "this bot.",
             file=sys.stderr,
         )
         return 1
@@ -270,7 +267,13 @@ def main() -> int:
         if not is_allowed(chat_id, allowed):
             print(f"ignored message from unauthorized chat {chat_id}", file=sys.stderr)
             return
-        text = update.message.text.strip()
+        if chat_id is not None and not limiter.allow(chat_id, time.monotonic()):
+            print(f"rate-limited chat {chat_id}", file=sys.stderr)
+            return
+        # Strip control chars + cap length before anything reaches the terminal.
+        text, truncated = sanitize_injection(update.message.text.strip())
+        if not text:
+            return
         chat_id = chat_id or 0
         if text.startswith("/"):
             base = text.strip().split()[0].lower().split("@")[0]
@@ -289,6 +292,8 @@ def main() -> int:
             reply = _handle_command(text)
         else:
             reply = _handle_natural_language(chat_id, text)
+        if truncated:
+            reply = f"⚠️ 消息过长，已截断到 {len(text)} 字后注入\n{reply}"
         await update.message.reply_text(reply[:4000])
 
     async def on_callback(update: Update, context) -> None:
