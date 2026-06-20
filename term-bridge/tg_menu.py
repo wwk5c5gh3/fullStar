@@ -19,6 +19,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("check", "环境检查"),
     ("stop", "停止当前运行"),
     ("interrupt", "中断当前运行 (Ctrl-C)"),
+    ("approve", "审批模式开关（on/off）"),
     ("reset", "重置当前会话"),
     ("compact", "压缩会话上下文"),
     ("model", "查看或切换模型"),

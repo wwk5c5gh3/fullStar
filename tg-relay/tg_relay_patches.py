@@ -261,6 +261,17 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
+        if cmd == "/approve":
+            from agent_cli import read_approve_mode, set_approve_mode
+            arg = (parts[1].strip().lower() if len(parts) > 1 else "")
+            if arg in ("on", "1", "yes"):
+                set_approve_mode(True)
+                return "✅ 审批模式已开启：新开的 agent 会逐个询问权限，提示会以按钮发到这里点批准/拒绝"
+            if arg in ("off", "0", "no"):
+                set_approve_mode(False)
+                return "审批模式已关闭：新开的 agent 自动放行（bypassPermissions）"
+            state = "开启" if read_approve_mode() else "关闭"
+            return f"审批模式当前: {state}\n用法: /approve on|off（仅影响之后 /new 的会话）"
         if cmd == "/sel":
             # interactive-prompt option button → inject the chosen number into (w,t)
             arg = parts[1] if len(parts) > 1 else ""
