@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "term-bridge"))
 
 import term_backend
 from iterm_route import format_tabs_message, list_tabs, parse_routed_message
-from iterm_target import apply_target_env, resolve_target
+from iterm_target import ItermTarget, apply_target_env, resolve_target
 from tg_format_config import VALID as _FORMATS, get_format, set_format
 from tg_new_command import SpawnResult, retarget_env
 
@@ -261,6 +261,24 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
+        if cmd == "/status":
+            from agent_status import classify_state, format_status
+            code, tabs = list_tabs()
+            if code != 0 or not tabs:
+                return "没有打开的终端窗口"
+            rows = []
+            for i, t in enumerate(tabs, 1):
+                target = ItermTarget(window=t.window, tab=t.tab)
+                try:
+                    cap = subprocess.run(
+                        [sys.executable, str(term_backend.capture_script())],
+                        env=apply_target_env(target), capture_output=True, text=True,
+                        timeout=20, stdin=subprocess.DEVNULL,
+                    ).stdout
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    cap = ""
+                rows.append((str(i), t.label, t.name, classify_state(cap)))
+            return format_status(rows)
         if cmd == "/diff":
             from git_diff_report import format_diff_reply
             d = parts[1] if len(parts) > 1 else str(ROOT)

@@ -12,6 +12,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("new", "新 tab 启动 agent 会话"),
     ("tabs", "列出终端标签"),
     ("tab", "选择转发目标 tab"),
+    ("status", "各终端 agent 状态"),
     ("shot", "截图：设备 / Mac 屏幕 / 终端"),
     ("format", "设置回传格式"),
     ("devices", "列出设备"),
