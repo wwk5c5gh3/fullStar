@@ -63,6 +63,9 @@ def _key_applescript(key: str) -> str:
         action = '                    write text ""'
     elif key == "esc":
         action = "                    write text (character id 27) without newline"
+    elif key == "ctrl-c":
+        # Ctrl-C = ETX (character id 3) — interrupts the foreground program.
+        action = "                    write text (character id 3) without newline"
     else:
         raise ValueError(f"unknown key: {key!r}")
     return (
@@ -157,7 +160,7 @@ def main() -> int:
     parser.add_argument("--no-enter", action="store_true", help="Type without pressing Enter")
     parser.add_argument("--enter-twice", action="store_true", help="Send Return twice (slash commands in TUIs)")
     parser.add_argument("--clear-line", action="store_true", help="Ctrl-U before write (wipe leftover input)")
-    parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
+    parser.add_argument("--key", choices=("enter", "esc", "ctrl-c"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

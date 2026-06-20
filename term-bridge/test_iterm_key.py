@@ -24,6 +24,12 @@ def test_key_applescript_esc_writes_escape_char():
     assert "character id 27" in s
 
 
+def test_key_applescript_ctrl_c_writes_etx_char():
+    # Ctrl-C = ETX = character id 3, sent without a trailing newline.
+    s = iterm_inject_mod._key_applescript("ctrl-c")
+    assert "character id 3" in s
+
+
 def test_key_applescript_unknown_key_raises():
     with pytest.raises(ValueError, match="unknown key"):
         iterm_inject_mod._key_applescript("tab")

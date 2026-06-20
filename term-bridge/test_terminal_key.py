@@ -24,6 +24,12 @@ def test_key_script_esc_uses_key_code_53():
     assert "tab 1" in s
 
 
+def test_key_script_ctrl_c_sends_control_c():
+    s = lib.build_key_script(window=1, tab=2, key="ctrl-c")
+    assert 'keystroke "c" using control down' in s
+    assert "tab 2" in s
+
+
 def test_key_script_unknown_key_raises():
     with pytest.raises(ValueError):
         lib.build_key_script(window=1, tab=1, key="tab")

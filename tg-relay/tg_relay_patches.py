@@ -261,7 +261,7 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
-        if cmd in ("/stop", "/reset", "/compact", "/model", "/think"):
+        if cmd in ("/stop", "/interrupt", "/reset", "/compact", "/model", "/think"):
             from tg_session_control import resolve_session_command, session_usage
             arg = parts[1] if len(parts) > 1 else ""
             action = resolve_session_command(cmd, arg)

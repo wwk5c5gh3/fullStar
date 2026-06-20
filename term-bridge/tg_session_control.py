@@ -30,6 +30,8 @@ def resolve_session_command(cmd: str, arg: str = "") -> InjectAction | None:
     arg = arg.strip().lower()
     if cmd == "/stop":
         return InjectAction(kind="key", payload="esc")
+    if cmd == "/interrupt":
+        return InjectAction(kind="key", payload="ctrl-c")
     if cmd == "/reset":
         return InjectAction(kind="text", payload="/clear")
     if cmd == "/compact":

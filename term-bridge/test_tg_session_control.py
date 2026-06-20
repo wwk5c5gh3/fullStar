@@ -9,6 +9,11 @@ def test_stop_is_single_esc_key():
     assert a == sc.InjectAction(kind="key", payload="esc")
 
 
+def test_interrupt_is_ctrl_c_key():
+    a = sc.resolve_session_command("/interrupt")
+    assert a == sc.InjectAction(kind="key", payload="ctrl-c")
+
+
 def test_reset_clears():
     assert sc.resolve_session_command("/reset") == sc.InjectAction(kind="text", payload="/clear")
 

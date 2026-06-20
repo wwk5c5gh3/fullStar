@@ -17,6 +17,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("devices", "列出设备"),
     ("check", "环境检查"),
     ("stop", "停止当前运行"),
+    ("interrupt", "中断当前运行 (Ctrl-C)"),
     ("reset", "重置当前会话"),
     ("compact", "压缩会话上下文"),
     ("model", "查看或切换模型"),

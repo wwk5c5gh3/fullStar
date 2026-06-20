@@ -127,7 +127,7 @@ def main() -> int:
     parser.add_argument("--no-enter", action="store_true", help="Paste without pressing Return")
     parser.add_argument("--enter-twice", action="store_true", help="Press Return twice (slash commands in TUIs)")
     parser.add_argument("--clear-line", action="store_true", help="Ctrl-U before paste (wipe leftover input)")
-    parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
+    parser.add_argument("--key", choices=("enter", "esc", "ctrl-c"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

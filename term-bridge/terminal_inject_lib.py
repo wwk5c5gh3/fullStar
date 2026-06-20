@@ -8,7 +8,11 @@ named by the TERM_INJECT_FILE env var to avoid AppleScript string escaping.
 """
 from __future__ import annotations
 
-_KEY_ACTIONS = {"enter": "keystroke return", "esc": "key code 53"}
+_KEY_ACTIONS = {
+    "enter": "keystroke return",
+    "esc": "key code 53",
+    "ctrl-c": 'keystroke "c" using control down',
+}
 
 
 def _window_ref(window: int | None) -> str:
