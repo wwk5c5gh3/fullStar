@@ -12,10 +12,42 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
 
 import term_backend
-from iterm_route import format_tabs_message, list_tabs, parse_routed_message
+from iterm_route import (
+    RouteResult,
+    format_tabs_message,
+    list_tabs,
+    route_message,
+)
 from iterm_target import ItermTarget, apply_target_env, resolve_target
 from tg_format_config import VALID as _FORMATS, get_format, set_format
+from tg_menu import MENU_COMMANDS
 from tg_new_command import SpawnResult, retarget_env
+
+# Natural-language routing examples appended below the generated command list.
+# The command list itself is generated from MENU_COMMANDS so /help can't drift.
+_NL_HELP_FOOTER = (
+    "\n自然语言 -> 终端 + inbox\n"
+    "  前缀示例:\n"
+    "  [t2] 问题 — tab 2\n"
+    "  [mobile-agent] 问题 — 匹配目录名\n"
+    "  @t3: 问题 — tab 3\n"
+    "  (无前缀 = .env 默认 TG_ITERM_TAB)"
+)
+
+# Telegram hard-caps a message at 4096 chars.
+_TELEGRAM_LIMIT = 4096
+
+
+def _build_help_text() -> str:
+    """Render /help (and /start) from MENU_COMMANDS so it never drifts.
+
+    Lists every ("name", "desc") as "/name — desc", then appends the
+    natural-language prefix examples. Truncated to stay under Telegram's limit.
+    """
+    header = "mobile-agent bot\n"
+    cmd_lines = "\n".join(f"/{name} — {desc}" for name, desc in MENU_COMMANDS)
+    text = f"{header}\n{cmd_lines}\n{_NL_HELP_FOOTER}"
+    return text[:_TELEGRAM_LIMIT]
 
 
 def _is_slash_command(text: str) -> bool:
@@ -105,9 +137,12 @@ def _schedule_iterm_monitor_poll(target=None) -> None:
             sys.executable,
             "-c",
             (
+                # NOTE: no --force — the running monitor daemon already streams
+                # replies and tracks "already sent". --force here bypassed that
+                # dedup and could re-send a reply the daemon just delivered.
                 "import time, subprocess, sys; "
                 f"time.sleep({secs}); "
-                f"subprocess.run([sys.executable, {monitor!r}, '--once', '--force'])"
+                f"subprocess.run([sys.executable, {monitor!r}, '--once'])"
             ),
         ],
         env=env,
@@ -168,6 +203,126 @@ def _parse_spawn_output(code: int, stdout: str, stderr: str) -> SpawnResult:
     return SpawnResult(code=code, tab=tab, workdir=workdir, raw=raw)
 
 
+def _backend_name() -> str:
+    """Human-facing name of the active terminal backend."""
+    return "iTerm" if term_backend.resolve_backend() == "iterm" else "Terminal"
+
+
+def _health_header() -> str:
+    """Pipeline health summary (relay/monitor alive, inject, backend), best-effort.
+
+    Prepended to /status so the user sees at a glance whether the pipeline is
+    alive before the per-tab list. Any failure degrades to a one-line note.
+    """
+    try:
+        import pipeline_doctor
+
+        return pipeline_doctor.health_summary()
+    except Exception as e:  # never let the doctor crash /status
+        return f"健康检查失败: {e}"
+
+
+def _monitor_poll_armed() -> bool:
+    """True when TG_ITERM_MONITOR_AFTER is set to a real delay (not an off value)."""
+    raw = os.environ.get("TG_ITERM_MONITOR_AFTER", "").strip().lower()
+    return raw not in ("", "0", "false", "no", "off")
+
+
+def _reply_chat_configured() -> bool:
+    """True when a positive-integer chat-id is set so AI replies can come back.
+
+    Mirrors pipeline_doctor._check_chat_id: a reply is only deliverable when
+    TELEGRAM_CHAT_ID (or the monitor's TG_ITERM_MONITOR_CHAT_ID) is a positive
+    integer. Empty / non-integer / non-positive means no reply path.
+    """
+    for key in ("TELEGRAM_CHAT_ID", "TG_ITERM_MONITOR_CHAT_ID"):
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        try:
+            if int(raw) > 0:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _reply_promise() -> str:
+    """Trailing note about whether/when an AI reply will be relayed back.
+
+    - No reply chat configured → warn the user replies won't arrive.
+    - Reply chat configured AND a delayed poll is armed → promise the relay.
+    - Otherwise → no note (a live monitor daemon may still stream replies).
+    """
+    if not _reply_chat_configured():
+        return "\n(⚠️ 回传未配置：设置 TELEGRAM_CHAT_ID 才能收到 AI 回复)"
+    if _monitor_poll_armed():
+        return "\n(output -> TG after delay)"
+    return ""
+
+
+def _unmatched_prefix_reply(prefix: str) -> str:
+    """Refusal shown when a routing prefix matched no open tab (no injection)."""
+    try:
+        tabs_block = format_tabs_message()
+    except Exception:  # tab enumeration must never crash the refusal
+        tabs_block = "(无法读取标签列表)"
+    return (
+        f"⚠️ 没找到匹配 [{prefix}] 的标签，已忽略未注入。\n"
+        f"当前可用:\n{tabs_block}"
+    )
+
+
+def _label_for_target(target: ItermTarget) -> str:
+    """Friendly label for a target: 'wN/tN (name)' when the tab is found, else 'wN/tN'.
+
+    Best-effort: tab enumeration may be unavailable (non-macOS / closed window),
+    in which case we fall back to the positional label so /sel always confirms.
+    """
+    try:
+        code, tabs = list_tabs()
+    except Exception:
+        code, tabs = 1, []
+    if code == 0:
+        for t in tabs:
+            if t.window == target.window and t.tab == target.tab:
+                return f"{target.label()} ({t.name[:40]})"
+    return target.label()
+
+
+def _resolve_sel(arg: str) -> tuple[ItermTarget, int] | None:
+    """Parse a /sel argument into (target, choice_number).
+
+    Accepts two forms:
+      - "w:t:n" (callback form) → inject n into window w / tab t.
+      - bare "n" (human-typed)  → inject n into the current default/active tab.
+    Returns None when the argument is neither form.
+    """
+    m = re.match(r"^(\d+):(\d+):(\d+)$", arg)
+    if m:
+        w, t, n = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return ItermTarget(window=w, tab=t), n
+    if re.match(r"^\d+$", arg):
+        # Same sticky/default target the relay uses for unprefixed messages.
+        return route_message("").target, int(arg)
+    return None
+
+
+def _inject_receipt(result: RouteResult, backend_name: str, body: str) -> str:
+    """Success receipt: '✓ 已注入 <backend> <tab_label>' + preview + notes."""
+    tab_label = (
+        f"tab {result.hit.tab} ({result.hit.name[:40]})"
+        if result.hit
+        else result.target.label()
+    )
+    preview = body[:80] + ("…" if len(body) > 80 else "")
+    return (
+        f"✓ 已注入 {backend_name} {tab_label}\n"
+        f"{preview}\n(+ inbox backup)"
+        f"{_reply_promise()}"
+    )
+
+
 def _spawn_session(agent_key: str, prompt: str) -> SpawnResult:
     cmd = [sys.executable, str(ROOT / "term-bridge" / "terminal-spawn.py"), "--agent", agent_key]
     if prompt:
@@ -184,23 +339,23 @@ def _spawn_session(agent_key: str, prompt: str) -> SpawnResult:
 
 def apply(mod: ModuleType) -> None:
     def handle_natural_language(chat_id: int, text: str) -> str:
-        target, body, hit = parse_routed_message(text)
+        result = route_message(text)
+        # Wrong-session footgun guard: a prefix was typed but matched no open
+        # tab — refuse instead of silently injecting into the default tab.
+        if result.unmatched_prefix is not None:
+            return _unmatched_prefix_reply(result.unmatched_prefix)
+        target, body = result.target, result.body
         mod._append_inbox(chat_id, f"[{target.label()}] {body}")
         if mod._iterm_inject_enabled():
             if sys.platform != "darwin":
                 return "saved to inbox (iTerm inject needs macOS)"
-            backend_name = "iTerm" if term_backend.resolve_backend() == "iterm" else "Terminal"
+            backend_name = _backend_name()
             code, out = _inject_iterm(body, target=target)
             if code == 0:
                 _schedule_iterm_monitor_poll(target=target)
-                preview = body[:80] + ("…" if len(body) > 80 else "")
-                tab_note = f"tab {hit.tab} ({hit.name[:40]})" if hit else target.label()
-                extra = ""
-                if os.environ.get("TG_ITERM_MONITOR_AFTER", "").strip() not in ("", "0", "false", "no", "off"):
-                    extra = "\n(output -> TG after delay)"
-                return f"typed into {backend_name} {tab_note}\n{preview}\n(+ inbox backup){extra}"
+                return _inject_receipt(result, backend_name, body)
             return f"inbox saved; {backend_name} failed:\n{out[:800]}"
-        return "task queued — ./mob tg-inbox (set TG_RELAY_ITERM_INJECT=1 for iTerm)"
+        return mod.INJECT_DISABLED_NOTICE
 
     orig_cmd = mod._handle_command
 
@@ -213,25 +368,7 @@ def apply(mod: ModuleType) -> None:
         parts = text.split()
         cmd = parts[0].lower().split("@")[0]
         if cmd in ("/start", "/help"):
-            return (
-                "mobile-agent bot\n\n"
-                "/check — environment check\n"
-                "/shot android|ios — screenshot to Telegram\n"
-                "/tap X Y [android|ios]\n"
-                "/swipe X1 Y1 X2 Y2 [android|ios]\n"
-                "/devices — list devices\n"
-                "/tabs — list iTerm tabs + routing hints\n"
-                "/new claude|codex [prompt] — 新 tab 启动 agent 会话\n"
-                "/format html|markdown|plain|screenshot — 回传格式\n"
-                "/stop /reset /compact /model /think — 控制当前会话\n\n"
-                "Natural language -> iTerm + inbox\n"
-                "  Prefix examples:\n"
-                "  [t2] question — tab 2\n"
-                "  [mobile-agent] question — match directory name\n"
-                "  @t3: question — tab 3\n"
-                "  (no prefix = .env default TG_ITERM_TAB)\n"
-                "  TG_RELAY_ITERM_INJECT=1"
-            )
+            return _build_help_text()
         if cmd == "/tabs":
             return format_tabs_message()[:4000]
         if cmd.startswith("/format") or cmd.startswith("/fmt"):
@@ -273,23 +410,25 @@ def apply(mod: ModuleType) -> None:
             state = "开启" if read_approve_mode() else "关闭"
             return f"审批模式当前: {state}\n用法: /approve on|off（仅影响之后 /new 的会话）"
         if cmd == "/sel":
-            # interactive-prompt option button → inject the chosen number into (w,t)
+            # interactive-prompt option button (w:t:n) OR a bare typed number
+            # (-> current default tab). Inject the chosen option number.
             arg = parts[1] if len(parts) > 1 else ""
-            m = re.match(r"^(\d+):(\d+):(\d+)$", arg)
-            if not m:
-                return f"无法解析选择: {arg}"
-            w, t, n = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            resolved = _resolve_sel(arg)
+            if resolved is None:
+                return f"无法解析选择: {arg}\n用法: /sel 2 或 /sel w:t:n"
+            sel_target, n = resolved
             if sys.platform != "darwin":
                 return "需要 macOS"
-            code, out = _inject_iterm(str(n), target=ItermTarget(window=w, tab=t))
+            code, out = _inject_iterm(str(n), target=sel_target)
             if code == 0:
-                return f"✓ 已选择第 {n} 项"
+                return f"✓ 已向 {_label_for_target(sel_target)} 选择第 {n} 项"
             return f"选择失败:\n{out[:600]}"
         if cmd == "/status":
             from agent_status import classify_state, format_status
+            header = _health_header()
             code, tabs = list_tabs()
             if code != 0 or not tabs:
-                return "没有打开的终端窗口"
+                return f"{header}\n\n没有打开的终端窗口"
             rows = []
             for i, t in enumerate(tabs, 1):
                 target = ItermTarget(window=t.window, tab=t.tab)
@@ -302,7 +441,7 @@ def apply(mod: ModuleType) -> None:
                 except (subprocess.TimeoutExpired, FileNotFoundError):
                     cap = ""
                 rows.append((str(i), t.label, t.name, classify_state(cap)))
-            return format_status(rows)
+            return f"{header}\n\n{format_status(rows)}"
         if cmd == "/diff":
             from git_diff_report import format_diff_reply
             d = parts[1] if len(parts) > 1 else str(ROOT)
@@ -370,9 +509,15 @@ def apply(mod: ModuleType) -> None:
             if msg.startswith("/"):
                 print(handle_command(msg))
             else:
-                target, body, hit = parse_routed_message(msg)
-                tab = f" ({hit.name})" if hit else ""
-                print(f"[dry-run] would inject to iTerm {target.label()}{tab} + inbox:\n{body}")
+                result = route_message(msg)
+                if result.unmatched_prefix is not None:
+                    print(_unmatched_prefix_reply(result.unmatched_prefix))
+                else:
+                    tab = f" ({result.hit.name})" if result.hit else ""
+                    print(
+                        f"[dry-run] would inject to iTerm "
+                        f"{result.target.label()}{tab} + inbox:\n{result.body}"
+                    )
             return 0
 
         return orig_main()

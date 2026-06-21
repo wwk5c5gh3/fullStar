@@ -107,14 +107,18 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def _iterm_inject_enabled() -> bool:
-    """Replicate tg-relay.py ``_iterm_inject_enabled`` semantics at read time.
+_INJECT_OFF_VALUES = ("0", "false", "no", "off")
 
-    We read the *observed* behavior of the relay rather than hard-coding it, so
-    the doctor stays correct even if another agent changes the truthy set.
+
+def _iterm_inject_enabled() -> bool:
+    """Mirror tg-relay.py ``_iterm_inject_enabled``: ON unless explicitly disabled.
+
+    An unset/empty value means ENABLED (injection is the product's purpose; WHO
+    may inject is gated by the fail-closed chat-id allowlist). Only an explicit
+    off value (0/false/no/off) disables it.
     """
     v = os.environ.get("TG_RELAY_ITERM_INJECT", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    return v not in _INJECT_OFF_VALUES
 
 
 def _daemon_check(name: str, pidfile: Path) -> Check:
@@ -191,7 +195,7 @@ def _check_inject() -> Check:
         return Check("终端注入", "pass", "已开启")
     return Check(
         "终端注入", "warn", "已关闭（消息不会注入终端，只存 inbox）",
-        fix="在 .env 设置 TG_RELAY_ITERM_INJECT=1",
+        fix="改为 TG_RELAY_ITERM_INJECT=1（或删除该行，默认即开启）",
     )
 
 

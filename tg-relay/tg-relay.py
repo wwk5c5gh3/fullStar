@@ -22,6 +22,13 @@ from rate_limit import RateLimiter  # noqa: E402
 INBOX_DIR = ROOT / "inbox"
 INBOX_FILE = INBOX_DIR / "pending.txt"
 
+# Shown when injection is explicitly disabled: the message is only stored in the
+# inbox and never reaches the terminal. Make that unmistakable to the user.
+INJECT_DISABLED_NOTICE = (
+    "⚠️ 注入已关闭：消息只存入 inbox，未发送到终端"
+    "（在 .env 设 TG_RELAY_ITERM_INJECT=1 开启）"
+)
+
 
 def _load_env() -> None:
     candidates = [ROOT / ".env"]
@@ -57,9 +64,33 @@ def _append_inbox(chat_id: int, text: str) -> None:
         f.write(f"[{ts}] chat={chat_id}\n{text.strip()}\n---\n")
 
 
+# Explicit "off" values that disable terminal injection. Anything else —
+# including unset/empty — is treated as ENABLED: injection is the product's
+# whole purpose and *who* may inject is already fail-closed by the chat-id
+# allowlist, so requiring an opt-in only made the bot silently no-op.
+_INJECT_OFF_VALUES = ("0", "false", "no", "off")
+
+
 def _iterm_inject_enabled() -> bool:
+    """True unless TG_RELAY_ITERM_INJECT is an explicit off value (0/false/no/off)."""
     v = os.environ.get("TG_RELAY_ITERM_INJECT", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    return v not in _INJECT_OFF_VALUES
+
+
+def _injection_banner() -> str:
+    """One-line, secret-free summary of injection state + active backend.
+
+    Logged at startup so the relay's behavior is never silent — e.g.
+    ``inject=ON backend=terminal``. Never includes the bot token.
+    """
+    state = "ON" if _iterm_inject_enabled() else "OFF"
+    try:
+        from term_backend import resolve_backend
+
+        backend = resolve_backend()
+    except Exception:  # backend resolution must never block startup logging
+        backend = "unknown"
+    return f"inject={state} backend={backend}"
 
 
 def _inject_iterm(text: str) -> tuple[int, str]:
@@ -106,7 +137,7 @@ def _handle_natural_language(chat_id: int, text: str) -> str:
                 extra = "\n(output -> TG after delay)"
             return f"✓ typed into iTerm (1st window)\n{preview}\n(+ inbox backup){extra}"
         return f"inbox saved; iTerm failed:\n{out[:800]}"
-    return "task queued — ./mob tg-inbox (set TG_RELAY_ITERM_INJECT=1 for iTerm)"
+    return INJECT_DISABLED_NOTICE
 
 
 def _parse_other_pids(pgrep_output: str, me: int) -> list[int]:
@@ -148,6 +179,36 @@ def _parse_tap(args: list[str]) -> tuple[str, int, int] | None:
         return None
 
 
+def _pipeline_report() -> str:
+    """Pipeline doctor report (relay/monitor/token/inject/...), best-effort.
+
+    A stuck operator needs the *pipeline* status before the device doctor, so
+    this runs first in /check. Any failure degrades to a one-line note instead
+    of crashing the command.
+    """
+    try:
+        import pipeline_doctor
+
+        checks = pipeline_doctor.run_checks()
+        return pipeline_doctor.format_report(checks, header="管道自检")
+    except Exception as e:  # never let the doctor crash /check
+        return f"管道自检失败: {e}"
+
+
+def _device_report() -> str:
+    """Mobile-device doctor (compose check), best-effort."""
+    code, out = _run([str(ROOT / "mob-compose" / "compose"), "check"])
+    return out if out else f"exit {code}"
+
+
+def _check_report() -> str:
+    """/check output: pipeline doctor first, mobile-device check below."""
+    pipeline = _pipeline_report()
+    devices = _device_report()
+    combined = f"{pipeline}\n\n— 设备检查 —\n{devices}"
+    return combined[:4000]
+
+
 def _handle_command(text: str) -> str:
     text = text.strip()
     if not text:
@@ -172,8 +233,7 @@ def _handle_command(text: str) -> str:
         )
 
     if cmd == "/check":
-        code, out = _run([str(ROOT / "mob-compose" / "compose"), "check"])
-        return out[:4000] if out else f"exit {code}"
+        return _check_report()
 
     if cmd == "/devices":
         lines = []
@@ -407,6 +467,7 @@ def main() -> int:
     app.add_handler(MessageHandler(filters.COMMAND, on_message))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, on_media))
     print(f"mobile-agent tg-relay listening (root={ROOT})")
+    print(_injection_banner())
     try:
         app.run_polling(allowed_updates=["message", "callback_query"])
     except Conflict:

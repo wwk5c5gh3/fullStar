@@ -100,13 +100,20 @@ def test_allowlist_explicit_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 # Inject
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("val", ["1", "true", "yes", "on", "ON", "True"])
+# Injection is ON unless explicitly disabled (unset/empty = enabled), mirroring
+# the relay's _iterm_inject_enabled — only explicit off values warn.
+@pytest.mark.parametrize("val", ["1", "true", "yes", "on", "ON", "True", "", "anything"])
 def test_inject_on_passes(monkeypatch: pytest.MonkeyPatch, val: str) -> None:
     monkeypatch.setenv("TG_RELAY_ITERM_INJECT", val)
     assert pd._check_inject().status == "pass"
 
 
-@pytest.mark.parametrize("val", ["", "0", "false", "no", "off"])
+def test_inject_unset_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TG_RELAY_ITERM_INJECT", raising=False)
+    assert pd._check_inject().status == "pass"
+
+
+@pytest.mark.parametrize("val", ["0", "false", "no", "off"])
 def test_inject_off_warns(monkeypatch: pytest.MonkeyPatch, val: str) -> None:
     monkeypatch.setenv("TG_RELAY_ITERM_INJECT", val)
     assert pd._check_inject().status == "warn"
