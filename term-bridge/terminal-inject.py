@@ -16,25 +16,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
+from access_hint import with_access_hint  # noqa: E402
 from iterm_target import ItermTarget, resolve_target  # noqa: E402
 from terminal_inject_lib import build_inject_script, build_key_script  # noqa: E402
-
-_ACCESS_HINT = (
-    "\n\n需要授权宿主进程（Terminal / Claude Code / Python）："
-    "系统设置 → 隐私与安全性 → 辅助功能（发送按键），"
-    "以及 自动化 中允许控制 “System Events” 与 “Terminal”。"
-)
-
-
-def _needs_access_hint(out: str) -> bool:
-    low = out.lower()
-    return (
-        "-25211" in out  # accessibility / assistive access
-        or "-1743" in out  # not authorized to send Apple events (Automation)
-        or "assistive access" in low
-        or "辅助" in out
-        or "授权" in out
-    )
 
 
 def _load_env() -> None:
@@ -88,9 +72,7 @@ def inject(
         )
         out = ((r.stdout or "") + (r.stderr or "")).strip()
         if r.returncode != 0:
-            if _needs_access_hint(out):
-                out += _ACCESS_HINT
-            return r.returncode, out or "osascript failed"
+            return r.returncode, with_access_hint(out) or "osascript failed"
         return 0, out or "ok"
     finally:
         try:
@@ -111,9 +93,7 @@ def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str
     )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     if r.returncode != 0:
-        if _needs_access_hint(out):
-            out += _ACCESS_HINT
-        return r.returncode, out or "osascript failed"
+        return r.returncode, with_access_hint(out) or "osascript failed"
     return 0, out or "ok"
 
 

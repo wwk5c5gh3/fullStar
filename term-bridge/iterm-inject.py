@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
+from access_hint import with_access_hint  # noqa: E402
 from iterm_target import (  # noqa: E402
     ItermTarget,
     applescript_session_block,
@@ -127,7 +128,9 @@ def inject(
             stdin=subprocess.DEVNULL,
         )
         out = ((r.stdout or "") + (r.stderr or "")).strip()
-        return r.returncode, out or ("ok" if r.returncode == 0 else "osascript failed")
+        if r.returncode != 0:
+            return r.returncode, with_access_hint(out) or "osascript failed"
+        return 0, out or "ok"
     finally:
         try:
             os.unlink(path)
@@ -147,7 +150,9 @@ def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str
         env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
     )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
-    return r.returncode, out or ("ok" if r.returncode == 0 else "osascript failed")
+    if r.returncode != 0:
+        return r.returncode, with_access_hint(out) or "osascript failed"
+    return 0, out or "ok"
 
 
 def main() -> int:

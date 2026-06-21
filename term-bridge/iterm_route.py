@@ -160,11 +160,57 @@ def _sticky_default() -> ItermTarget:
     return d
 
 
-def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
+@dataclass(frozen=True)
+class RouteResult:
+    """Outcome of parsing a routing prefix.
+
+    `unmatched_prefix` is the raw prefix key the user typed, set ONLY when a
+    routing prefix was present, tabs were enumerable, and no tab matched. It is
+    None when no prefix was present, the prefix matched a tab, or tabs could not
+    be enumerated (e.g. non-macOS/test) — in those cases we genuinely cannot
+    tell the prefix was wrong, so we must not falsely reject it.
     """
-    Parse routing prefix from message.
-    Returns (target, body_without_prefix, matched_tab_info_or_none).
-    Falls back to resolve_target() from .env when no prefix.
+
+    target: ItermTarget
+    body: str
+    hit: TabInfo | None
+    unmatched_prefix: str | None
+
+
+def _route_for_tab(
+    tabs: list[TabInfo], key: str, rest: str, default: ItermTarget
+) -> RouteResult:
+    """Resolve a numeric tab prefix against an already-enumerated tab list."""
+    try:
+        n = int(key)
+    except ValueError:
+        return RouteResult(default, rest, None, key)
+    hit = _find_by_tab_number(tabs, n, window=default.window)
+    if hit:
+        target = ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id)
+        return RouteResult(target, rest, hit, None)
+    return RouteResult(default, rest, None, key)
+
+
+def _route_for_alias(
+    tabs: list[TabInfo], key: str, rest: str, default: ItermTarget
+) -> RouteResult:
+    """Resolve an alias/key prefix against an already-enumerated tab list."""
+    hit = _find_by_key(tabs, key)
+    if hit:
+        target = ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id)
+        return RouteResult(target, rest, hit, None)
+    return RouteResult(default, rest, None, key)
+
+
+def route_message(text: str) -> RouteResult:
+    """
+    Parse routing prefix from message into a RouteResult.
+
+    Falls back to resolve_target() from .env when no prefix. Sets
+    unmatched_prefix to the typed key only when a prefix was present, the tab
+    list was enumerable, and nothing matched — letting callers distinguish
+    "no prefix → default" from "prefix given but unmatched".
     """
     body = text.strip()
     default = _sticky_default()
@@ -176,28 +222,31 @@ def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
         key = m.group(1)
         rest = body[m.end() :].strip()
         if not rest:
-            return default, body, None
+            return RouteResult(default, body, None, None)
 
         code, tabs = list_tabs()
         if code != 0 or not tabs:
-            return default, rest, None
+            # Can't enumerate tabs; we genuinely can't tell the prefix is wrong.
+            return RouteResult(default, rest, None, None)
 
         if kind == "tab":
-            try:
-                n = int(key)
-            except ValueError:
-                return default, rest, None
-            hit = _find_by_tab_number(tabs, n, window=default.window)
-            if hit:
-                return ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id), rest, hit
-            return default, rest, None
+            return _route_for_tab(tabs, key, rest, default)
+        return _route_for_alias(tabs, key, rest, default)
 
-        hit = _find_by_key(tabs, key)
-        if hit:
-            return ItermTarget(window=hit.window, tab=hit.tab, session_id=hit.session_id), rest, hit
-        return default, rest, None
+    return RouteResult(default, body, None, None)
 
-    return default, body, None
+
+def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
+    """
+    Parse routing prefix from message.
+    Returns (target, body_without_prefix, matched_tab_info_or_none).
+    Falls back to resolve_target() from .env when no prefix.
+
+    Thin wrapper over route_message; behavior is byte-for-byte identical for
+    existing callers. Use route_message when you need unmatched_prefix.
+    """
+    r = route_message(text)
+    return r.target, r.body, r.hit
 
 
 def format_tabs_message() -> str:
