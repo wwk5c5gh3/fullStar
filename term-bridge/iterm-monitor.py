@@ -29,6 +29,7 @@ from iterm_extract import (  # noqa: E402
 from interactive_prompt import (  # noqa: E402
     detect_select_prompt,
     extract_select_options,
+    options_key,
     should_auto_default,
 )
 from iterm_target import resolve_target  # noqa: E402
@@ -518,14 +519,22 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
         # instead of silently auto-defaulting to the first option.
         if detect_select_prompt(current):
             opts = extract_select_options(current)
-            if opts and _read_prompt_alert_mark() != stable_key:
-                _write_prompt_alert_mark(stable_key)
+            # Dedup on the options themselves, not the full screen: the spinner
+            # and timer churn `stable_key` every poll, which would otherwise
+            # re-push the same menu over and over.
+            opt_key = options_key(opts)
+            if opts and _read_prompt_alert_mark() != opt_key:
+                _write_prompt_alert_mark(opt_key)
                 buttons = [
                     [f"{n}. {label[:40]}", f"sel:{target.window}:{target.tab}:{n}"]
                     for n, label in opts
                 ]
                 b_code, b_msg = _send_tg_buttons("⏳ Agent 在等你选择（点按钮选）:", buttons)
                 print(f"[{ts}] prompt buttons: {len(opts)} opts ({b_code} {b_msg[:50]})", flush=True)
+        elif _read_prompt_alert_mark():
+            # Prompt is gone — clear the mark so the next menu re-alerts even if
+            # it happens to have identical option labels.
+            _write_prompt_alert_mark("")
 
         if auto_default > 0:
             is_prompt = detect_select_prompt(current)

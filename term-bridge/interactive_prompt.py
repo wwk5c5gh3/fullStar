@@ -11,6 +11,25 @@ import re
 _CURSOR = "❯"
 _OPTION_RE = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$")
 
+# The live widget anchors its footer to the bottom of the screen. Once the menu
+# is answered, new output (spinner, input box) is drawn below it, so the footer
+# is no longer among the last few non-blank lines — that's how we tell a live
+# prompt from a stale one still sitting in the captured scrollback.
+_FOOTER_TAIL_LINES = 4
+
+
+def _is_footer(line: str) -> bool:
+    """True for a select-menu footer like `Enter to select · ↑/↓ to navigate`."""
+    low = line.lower()
+    return "enter to select" in low and (
+        "to navigate" in low or "↑" in line or "↓" in line
+    )
+
+
+def options_key(options: list[tuple[int, str]]) -> str:
+    """Stable dedup key for a set of options, immune to spinner/footer churn."""
+    return "|".join(f"{n}.{label}" for n, label in options)
+
 
 def extract_select_options(capture: str) -> list[tuple[int, str]]:
     """Parse a select menu's options as [(number, label)].
@@ -37,14 +56,17 @@ def extract_select_options(capture: str) -> list[tuple[int, str]]:
 
 
 def detect_select_prompt(capture: str) -> bool:
-    """True when the capture shows an arrow-select menu awaiting a choice."""
-    if not capture:
+    """True when the capture shows a *live* arrow-select menu awaiting a choice.
+
+    The footer must sit among the last few non-blank lines: a live widget is
+    anchored to the bottom of the screen, so a footer buried higher up is just
+    an already-answered menu lingering in the scrollback, not a live prompt.
+    """
+    if not capture or _CURSOR not in capture:
         return False
-    low = capture.lower()
-    has_footer = "enter to select" in low and (
-        "to navigate" in low or "↑" in capture or "↓" in capture
-    )
-    return has_footer and _CURSOR in capture
+    nonblank = [line for line in capture.splitlines() if line.strip()]
+    tail = nonblank[-_FOOTER_TAIL_LINES:]
+    return any(_is_footer(line) for line in tail)
 
 
 def should_auto_default(

@@ -14,6 +14,18 @@ MENU = (
 
 PLAIN = "Listed 1 directory\nThe working directory is empty.\nDone.\n"
 
+# The menu was answered: its text scrolled up and Claude is now working below it.
+# The footer is no longer at the bottom, so this is NOT a live prompt.
+STALE = (
+    MENU
+    + "● Got it — picking option 1.\n"
+    + "✶ Crunching… (esc to interrupt)\n"
+    + "  Reticulating splines\n"
+    + "╭──────────────────╮\n"
+    + "│ ❯                │\n"
+    + "╰──────────────────╯\n"
+)
+
 
 def test_detects_select_menu():
     assert ip.detect_select_prompt(MENU) is True
@@ -21,6 +33,23 @@ def test_detects_select_menu():
 
 def test_plain_output_is_not_a_prompt():
     assert ip.detect_select_prompt(PLAIN) is False
+
+
+def test_answered_menu_in_scrollback_is_not_a_prompt():
+    # Footer present in scrollback but new output sits below it → not live.
+    assert ip.detect_select_prompt(STALE) is False
+
+
+def test_menu_with_trailing_blank_lines_still_detected():
+    assert ip.detect_select_prompt(MENU + "\n\n") is True
+
+
+def test_options_key_is_stable_across_spinner_churn():
+    # Same menu, different volatile footer/spinner → same dedup key.
+    assert ip.options_key(ip.extract_select_options(MENU)) == ip.options_key(
+        ip.extract_select_options(MENU + "\n")
+    )
+    assert ip.options_key([]) == ""
 
 
 def test_footer_without_cursor_is_not_a_prompt():
