@@ -75,16 +75,27 @@ final class UnlockController: NSObject, NSTextFieldDelegate {
     }
 }
 
+// Borderless NSWindows return canBecomeKey=false by default, so the password
+// field can't receive keystrokes. Override it so the veil accepts keyboard input.
+final class VeilWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)  // no Dock icon
+// .regular (not .accessory) so the app reliably gets keyboard focus for the
+// password field; no Dock icon is shown for a borderless overlay in practice.
+app.setActivationPolicy(.regular)
 
 let unlock = UnlockController(expected: expectedHash, salt: salt)
 let hasPassword = !expectedHash.isEmpty
 
 var windows: [NSWindow] = []
+var mainWin: VeilWindow?
+var pwField: NSSecureTextField?
 let mainScreen = NSScreen.main
 for screen in NSScreen.screens {
-    let win = NSWindow(
+    let win = VeilWindow(
         contentRect: screen.frame,
         styleMask: .borderless,
         backing: .buffered,
@@ -134,13 +145,21 @@ for screen in NSScreen.screens {
         content.addSubview(hint)
         unlock.hint = hint
 
-        win.makeFirstResponder(field)
+        win.initialFirstResponder = field
+        mainWin = win
+        pwField = field
     }
 
     win.makeKeyAndOrderFront(nil)
     windows.append(win)
 }
 app.activate(ignoringOtherApps: true)
+
+// Make the password field the key window's first responder so it gets keystrokes.
+if let w = mainWin {
+    w.makeKeyAndOrderFront(nil)
+    if let f = pwField { w.makeFirstResponder(f) }
+}
 
 // Telegram `/veil off` sends SIGTERM. Clean exit.
 signal(SIGTERM) { _ in exit(0) }

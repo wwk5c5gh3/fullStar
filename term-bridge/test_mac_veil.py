@@ -69,3 +69,16 @@ def test_set_boot_toggles(tmp_path, monkeypatch):
     assert mac_veil.load_config()["enable_on_boot"] is True
     mac_veil.set_boot(False)
     assert mac_veil.load_config()["enable_on_boot"] is False
+
+
+def test_verify_password(tmp_path, monkeypatch):
+    monkeypatch.setattr(mac_veil, "CONFIG", tmp_path / "veil-config.json")
+    mac_veil.set_password("secret")
+    cfg = mac_veil.load_config()
+    assert mac_veil.verify_password("secret", cfg) is True
+    assert mac_veil.verify_password("wrong", cfg) is False
+
+
+def test_verify_password_no_config():
+    assert mac_veil.verify_password("x", {}) is False
+    assert mac_veil.verify_password("x", {"pwd_hash": "h"}) is False  # missing salt

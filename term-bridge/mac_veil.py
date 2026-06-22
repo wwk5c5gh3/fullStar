@@ -88,6 +88,14 @@ def set_password(password: str) -> None:
     save_config(cfg)
 
 
+def verify_password(attempt: str, cfg: dict) -> bool:
+    """True if attempt matches the stored salted hash (pure, testable)."""
+    stored, salt = cfg.get("pwd_hash"), cfg.get("salt")
+    if not stored or not salt:
+        return False
+    return hash_password(attempt, salt) == stored
+
+
 def set_boot(enabled: bool) -> None:
     cfg = load_config()
     cfg["enable_on_boot"] = bool(enabled)
@@ -252,6 +260,22 @@ def _setup_interactive() -> tuple[bool, str]:
     return True, f"✓ 已设密码 + 开机默认={'开' if ans in ('y','yes') else '关'} + {msg}"
 
 
+def _change_password_interactive() -> tuple[bool, str]:
+    import getpass
+
+    cfg = load_config()
+    if cfg.get("pwd_hash"):  # verify current password before allowing a change
+        if not verify_password(getpass.getpass("当前密码: "), cfg):
+            return False, "当前密码错误"
+    new1 = getpass.getpass("新密码: ")
+    if new1 != getpass.getpass("再输一次: "):
+        return False, "两次密码不一致"
+    if not new1:
+        return False, "密码不能为空"
+    set_password(new1)
+    return True, "✓ 密码已更改"
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "status"
     rest = argv[1:]
@@ -263,6 +287,8 @@ def main(argv: list[str]) -> int:
         ok, msg = True, status()
     elif cmd == "setup":
         ok, msg = _setup_interactive()
+    elif cmd in ("passwd", "change-password"):
+        ok, msg = _change_password_interactive()
     elif cmd == "set-password":
         if not rest:
             ok, msg = False, "用法: set-password <密码>"
@@ -280,7 +306,7 @@ def main(argv: list[str]) -> int:
     elif cmd == "uninstall-agent":
         ok, msg = uninstall_agent()
     else:
-        ok, msg = False, f"用法: mac_veil.py on|off|status|setup|set-password|boot|install-agent|uninstall-agent (got {cmd!r})"
+        ok, msg = False, f"用法: mac_veil.py on|off|status|setup|passwd|set-password|boot|install-agent|uninstall-agent (got {cmd!r})"
     print(msg)
     return 0 if ok else 1
 
