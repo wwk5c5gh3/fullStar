@@ -46,6 +46,24 @@ lockmac install-agent    # / uninstall-agent — manage login autostart
 
 Last resort: `ssh` in and `kill` the process.
 
+## Telegram remote control (optional, self-contained)
+
+lockmac can be driven from Telegram on its own — no other project needed:
+
+```bash
+lockmac tg-setup     # paste bot token, message the bot once → chat id auto-saved
+lockmac tg-test      # send a test message
+lockmac tg-listen    # long-poll; /lock /unlock /status from your chat control it
+```
+
+From your chat send `/lock`, `/unlock`, `/status`. Only the configured chat id is
+honored (fail-closed). `tg-listen` runs in the foreground — keep it alive with
+`nohup`, `tmux`, or a LaunchAgent.
+
+> One bot, one poller: getUpdates allows a single consumer per token. If
+> something else already polls that bot (e.g. another relay), give lockmac its
+> own bot — otherwise they conflict (Telegram 409).
+
 ## Files
 
 - `lockmac/overlay.swift` — the Swift overlay (compiled on first use to

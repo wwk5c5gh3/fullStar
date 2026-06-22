@@ -36,6 +36,20 @@ def _change_password_interactive() -> tuple[bool, str]:
     return True, "✓ password changed"
 
 
+def _tg_setup_interactive() -> tuple[bool, str]:
+    from lockmac import tg
+
+    token = input("Bot token (from @BotFather): ").strip()
+    if not token:
+        return False, "token required"
+    input("Now send any message to your bot in Telegram, then press Enter… ")
+    chat = tg.fetch_chat_id(token)
+    if not chat:
+        return False, "couldn't fetch chat id — message the bot first, then retry"
+    tg.set_tg(token, chat)
+    return True, f"✓ Telegram bound (chat {chat}). Run `lockmac tg-listen` to enable remote control."
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     cmd = argv[0] if argv else "status"
@@ -67,10 +81,19 @@ def main(argv: list[str] | None = None) -> int:
         ok, msg = core.install_agent()
     elif cmd in ("uninstall-agent", "autostart-off"):
         ok, msg = core.uninstall_agent()
+    elif cmd == "tg-setup":
+        ok, msg = _tg_setup_interactive()
+    elif cmd == "tg-test":
+        from lockmac import tg
+        ok = tg.notify("lockmac: Telegram test ✓")
+        msg = "✓ sent" if ok else "failed (run tg-setup first?)"
+    elif cmd == "tg-listen":
+        from lockmac import tg
+        return tg.listen()
     else:
         ok, msg = False, (
             f"usage: lockmac on|off|status|setup|passwd|set-password|boot|"
-            f"install-agent|uninstall-agent (got {cmd!r})"
+            f"install-agent|uninstall-agent|tg-setup|tg-test|tg-listen (got {cmd!r})"
         )
     print(msg)
     return 0 if ok else 1
