@@ -90,10 +90,15 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "tg-listen":
         from lockmac import tg
         return tg.listen()
+    elif cmd == "tg-install":
+        ok, msg = core.install_tg_agent()
+    elif cmd == "tg-uninstall":
+        ok, msg = core.uninstall_tg_agent()
     else:
         ok, msg = False, (
             f"usage: lockmac on|off|status|setup|passwd|set-password|boot|"
-            f"install-agent|uninstall-agent|tg-setup|tg-test|tg-listen (got {cmd!r})"
+            f"install-agent|uninstall-agent|tg-setup|tg-test|tg-listen|"
+            f"tg-install|tg-uninstall (got {cmd!r})"
         )
     print(msg)
     return 0 if ok else 1

@@ -53,12 +53,14 @@ lockmac can be driven from Telegram on its own — no other project needed:
 ```bash
 lockmac tg-setup     # paste bot token, message the bot once → chat id auto-saved
 lockmac tg-test      # send a test message
-lockmac tg-listen    # long-poll; /lock /unlock /status from your chat control it
+lockmac tg-listen    # long-poll in the foreground
+lockmac tg-install   # …or install a KeepAlive LaunchAgent: tg-listen runs at
+                     #   login and is restarted if it ever exits (tg-uninstall to remove)
 ```
 
 From your chat send `/lock`, `/unlock`, `/status`. Only the configured chat id is
-honored (fail-closed). `tg-listen` runs in the foreground — keep it alive with
-`nohup`, `tmux`, or a LaunchAgent.
+honored (fail-closed). Use `tg-listen` for a foreground run, or `tg-install` to
+keep it always-on across logins.
 
 > One bot, one poller: getUpdates allows a single consumer per token. If
 > something else already polls that bot (e.g. another relay), give lockmac its

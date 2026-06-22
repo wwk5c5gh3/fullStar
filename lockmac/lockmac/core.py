@@ -40,6 +40,9 @@ CONFIG = CONFIG_DIR / "config.json"
 AGENT_LABEL = "com.lockmac"
 AGENT_PLIST = HOME / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
 
+TG_AGENT_LABEL = "com.lockmac.tglisten"
+TG_AGENT_PLIST = HOME / "Library" / "LaunchAgents" / f"{TG_AGENT_LABEL}.plist"
+
 
 # ───────────────────────── build ─────────────────────────
 def needs_build(src_mtime: float, bin_exists: bool, bin_mtime: float) -> bool:
@@ -199,7 +202,12 @@ def status() -> str:
     pw = "set" if cfg.get("pwd_hash") else "unset"
     boot = "on" if cfg.get("enable_on_boot") else "off"
     agent = "installed" if AGENT_PLIST.exists() else "not installed"
-    return f"lockMac: {up} · password: {pw} · boot-default: {boot} · autostart: {agent}"
+    tg = "bound" if (cfg.get("tg_token") and cfg.get("tg_chat")) else "unbound"
+    tg_svc = "on" if TG_AGENT_PLIST.exists() else "off"
+    return (
+        f"lockMac: {up} · password: {pw} · boot-default: {boot} · autostart: {agent}"
+        f" · telegram: {tg} · tg-listen-svc: {tg_svc}"
+    )
 
 
 # ───────────────────────── LaunchAgent (boot autostart) ─────────────────────────
@@ -254,3 +262,46 @@ def boot_start() -> tuple[bool, str]:
     if load_config().get("enable_on_boot"):
         return start()
     return True, "boot-start: enable_on_boot=false, no veil"
+
+
+# ───────────────────────── TG-listen autostart (KeepAlive) ─────────────────────────
+def _tg_plist_xml() -> str:
+    prog = _cli_path() + ["tg-listen"]
+    items = "".join(f"    <string>{p}</string>\n" for p in prog)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n<dict>\n'
+        f"  <key>Label</key><string>{TG_AGENT_LABEL}</string>\n"
+        "  <key>ProgramArguments</key>\n  <array>\n"
+        f"{items}"
+        "  </array>\n"
+        "  <key>RunAtLoad</key><true/>\n"
+        "  <key>KeepAlive</key><true/>\n"  # restart the listener if it ever exits
+        "</dict>\n</plist>\n"
+    )
+
+
+def install_tg_agent() -> tuple[bool, str]:
+    cfg = load_config()
+    if not cfg.get("tg_token") or not cfg.get("tg_chat"):
+        return False, "run `lockmac tg-setup` first (no token/chat configured)"
+    TG_AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    TG_AGENT_PLIST.write_text(_tg_plist_xml(), encoding="utf-8")
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(TG_AGENT_PLIST)],
+                   capture_output=True)
+    r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(TG_AGENT_PLIST)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return False, f"launchctl bootstrap failed: {(r.stderr or r.stdout).strip()}"
+    return True, f"tg-listen autostart installed: {TG_AGENT_PLIST}"
+
+
+def uninstall_tg_agent() -> tuple[bool, str]:
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(TG_AGENT_PLIST)],
+                   capture_output=True)
+    TG_AGENT_PLIST.unlink(missing_ok=True)
+    return True, "tg-listen autostart uninstalled"

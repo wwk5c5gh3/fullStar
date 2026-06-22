@@ -42,3 +42,12 @@ def test_set_tg_roundtrip(tmp_path, monkeypatch):
     cfg = core.load_config()
     assert cfg["tg_token"] == "123:ABC"
     assert cfg["tg_chat"] == "999"
+
+
+def test_install_tg_agent_refuses_without_creds(tmp_path, monkeypatch):
+    # KeepAlive on tg-listen with no token would crash-loop → must refuse.
+    from lockmac import core
+    monkeypatch.setattr(core, "CONFIG", tmp_path / "config.json")
+    ok, msg = core.install_tg_agent()
+    assert ok is False
+    assert "tg-setup" in msg
