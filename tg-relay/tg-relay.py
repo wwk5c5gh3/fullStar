@@ -254,6 +254,16 @@ def _handle_command(text: str) -> str:
         _run([str(ROOT / "mob-compose" / "scripts" / "shot-android.sh"), "-c", "解锁后"])
         return f"{out}\n（已截图发送确认）" if out else "已尝试解锁（截图已发）"
 
+    if cmd == "/veil":
+        import mac_veil
+        sub = args[0].lower() if args else "status"
+        if sub == "on":
+            _ok, msg = mac_veil.start()
+            return f"{msg}\n（旁人看物理屏=黑；你 /shot 截图仍拿真实内容）" if _ok else msg
+        if sub == "off":
+            return mac_veil.stop()[1]
+        return mac_veil.status() + "\n用法: /veil on | off"
+
     if cmd == "/shot" and args:
         platform = args[0].lower()
         if platform in ("android", "ios"):
