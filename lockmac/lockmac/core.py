@@ -121,12 +121,28 @@ def set_boot(enabled: bool) -> None:
     save_config(cfg)
 
 
+def set_totp_secret(secret: str) -> None:
+    cfg = load_config()
+    cfg["totp_secret"] = secret
+    save_config(cfg)
+
+
+def get_totp_secret() -> str:
+    return load_config().get("totp_secret", "")
+
+
+def totp_enabled() -> bool:
+    return bool(get_totp_secret())
+
+
 def _password_env() -> dict:
     cfg = load_config()
     env = dict(os.environ)
     if cfg.get("pwd_hash") and cfg.get("salt"):
         env["LOCKMAC_PWHASH"] = cfg["pwd_hash"]
         env["LOCKMAC_SALT"] = cfg["salt"]
+    if cfg.get("totp_secret"):
+        env["LOCKMAC_TOTP_SECRET"] = cfg["totp_secret"]  # 2nd factor for local unlock
     return env
 
 

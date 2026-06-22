@@ -45,6 +45,13 @@ def test_set_tg_roundtrip(tmp_path, monkeypatch):
     assert cfg["tg_chat"] == "999"
 
 
+def test_dispatch_unveil_wrong_totp_refused(tmp_path, monkeypatch):
+    from lockmac import core, totp
+    monkeypatch.setattr(core, "CONFIG", tmp_path / "config.json")
+    core.set_totp_secret(totp.generate_secret())
+    assert "二步验证码" in tg._dispatch("unveil", "000000")
+
+
 def test_install_tg_agent_refuses_without_creds(tmp_path, monkeypatch):
     # KeepAlive on tg-listen with no token would crash-loop → must refuse.
     from lockmac import core

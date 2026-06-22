@@ -90,10 +90,14 @@ def fetch_chat_id(token: str) -> str | None:
         return None
 
 
-def _dispatch(action: str) -> str:
+def _dispatch(action: str, arg: str = "") -> str:
     if action == "veil":
         return core.start()[1]
     if action == "unveil":
+        if core.totp_enabled():
+            from lockmac import totp
+            if not totp.verify_totp(core.get_totp_secret(), arg):
+                return "需二步验证码：/unveil <6位码>"
         return core.stop()[1]
     if action == "syslock":
         return core.system_lock()[1]
@@ -125,6 +129,9 @@ def listen(poll_timeout: int = 25) -> int:
             msg = item.get("message") or {}
             if str((msg.get("chat") or {}).get("id")) != str(chat):
                 continue  # fail-closed: ignore everyone but the configured chat
-            action = parse_command(msg.get("text") or "")
+            text = msg.get("text") or ""
+            action = parse_command(text)
             if action:
-                notify(_dispatch(action))
+                parts = text.split()
+                arg = parts[1] if len(parts) > 1 else ""
+                notify(_dispatch(action, arg))

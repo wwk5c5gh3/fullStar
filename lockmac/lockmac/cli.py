@@ -92,6 +92,18 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "tg-listen":
         from lockmac import tg
         return tg.listen()
+    elif cmd in ("setup-2fa", "2fa-setup"):
+        from lockmac import totp
+        secret = totp.generate_secret()
+        core.set_totp_secret(secret)
+        uri = totp.provisioning_uri(secret)
+        ok, msg = True, (
+            "✓ 二步验证已启用（解除遮罩需 密码 + 6位码）\n"
+            f"密钥(手输): {secret}\n"
+            f"或扫码/粘贴到 authenticator:\n{uri}"
+        )
+    elif cmd == "2fa-off":
+        core.set_totp_secret(""); ok, msg = True, "二步验证已关闭"
     elif cmd == "tg-install":
         ok, msg = core.install_tg_agent()
     elif cmd == "tg-uninstall":
@@ -99,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ok, msg = False, (
             f"usage: lockmac veil|unveil|lock|status|setup|passwd|set-password|boot|"
-            f"install-agent|uninstall-agent|tg-setup|tg-test|tg-listen|"
-            f"tg-install|tg-uninstall (got {cmd!r})\n"
+            f"setup-2fa|2fa-off|install-agent|uninstall-agent|tg-setup|tg-test|"
+            f"tg-listen|tg-install|tg-uninstall (got {cmd!r})\n"
             f"  veil/unveil = removable privacy overlay; lock = real system lock (one-way)"
         )
     print(msg)
