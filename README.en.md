@@ -60,10 +60,10 @@ Even away from your computer, you can drive multiple projects' AI sessions remot
 **Enable** (prerequisite: Bot Token / Chat ID already configured):
 
 ```bash
-# .env
-TG_RELAY_ITERM_INJECT=1      # natural language → inject into terminal
+# .env (natural-language → terminal injection is ON BY DEFAULT, no setting needed)
 TG_TERM_BACKEND=terminal     # terminal backend: terminal (default, built-in Terminal.app) | iterm
 TG_ITERM_MONITOR_AFTER=45    # how long after injecting to start capturing the reply
+# TG_RELAY_ITERM_INJECT=0    # set this only to DISABLE injection (default is on)
 
 ./mob iterm-buffer-setup     # enlarge scrollback so long replies aren't truncated (once)
 ./mob iterm-list             # show tab indices / suggested prefixes
@@ -103,6 +103,10 @@ TG_RELAY_ALLOWED_CHAT_IDS=6226809975,123456789   # comma/semicolon separated; if
 
 - If the allowlist **and** `TELEGRAM_CHAT_ID` are **both empty** → the relay **refuses to start** (fail-closed), preventing an exposed instance.
 - Messages from non-allowlisted chats are ignored and never injected into the terminal.
+
+> **Approval mode (optional, instead of bypassed permissions)**: send `/approve on` and agents started by
+> *subsequent* `/new` will ask for each permission — the prompt arrives in Telegram as buttons you approve/deny.
+> `/approve off` restores auto-allow (bypassPermissions). Useful as a human gate when an agent runs risky operations.
 
 ### Auto-fallback when stuck + screenshot de-duplication
 
@@ -228,6 +232,7 @@ The Agent operates the devices via the vision loop in `SKILL.md` and relays the 
 | `/format html\|markdown\|plain\|screenshot` | Set the relay-back format (takes effect instantly, no restart) |
 | `/stop` | Stop the current run (send one Esc to the target session) |
 | `/interrupt` | Interrupt the current run (Ctrl-C) |
+| `/sel N` | Answer an agent's choice prompt (`/sel 2` picks option 2, or `/sel w:t:n` to target) |
 | `/approve on\|off` | Approval mode toggle: when on, the agent's permissions are gated |
 | `/reset` | Reset the current session (inject `/clear`) |
 | `/compact` | Compact the session context (inject `/compact`) |
