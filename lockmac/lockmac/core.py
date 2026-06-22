@@ -33,7 +33,10 @@ CACHE_DIR = _xdg("XDG_CACHE_HOME", HOME / ".cache") / "lockmac"
 CONFIG_DIR = _xdg("XDG_CONFIG_HOME", HOME / ".config") / "lockmac"
 
 SRC = Path(__file__).resolve().parent / "overlay.swift"
-BIN = CACHE_DIR / "lockmac"
+# LOCKMAC_BIN lets a packaged install (.pkg) point at a prebuilt universal binary
+# so the overlay never needs swiftc on the user's machine.
+_BIN_OVERRIDE = os.environ.get("LOCKMAC_BIN", "").strip()
+BIN = Path(_BIN_OVERRIDE) if _BIN_OVERRIDE else CACHE_DIR / "lockmac"
 PIDFILE = CACHE_DIR / "lockmac.pid"
 CONFIG = CONFIG_DIR / "config.json"
 
@@ -53,6 +56,8 @@ def needs_build(src_mtime: float, bin_exists: bool, bin_mtime: float) -> bool:
 
 
 def ensure_built() -> Path:
+    if _BIN_OVERRIDE and BIN.exists():
+        return BIN  # prebuilt (e.g. from .pkg) — never recompile
     src_m = SRC.stat().st_mtime
     bin_exists = BIN.exists()
     bin_m = BIN.stat().st_mtime if bin_exists else 0.0
