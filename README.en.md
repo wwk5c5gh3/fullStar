@@ -245,6 +245,7 @@ The Agent operates the devices via the vision loop in `SKILL.md` and relays the 
 | `/check` | Environment check |
 | `/devices` | List devices |
 | `/unlock` | Unlock Android (numeric PIN; set `ANDROID_UNLOCK_PIN` in `.env`; wake→swipe→type PIN→Enter, then screenshots to confirm) |
+| `/veil on\|off\|boot` | Privacy veil: black out the screen but **not a lock** (remote ops/screenshots unaffected). Dismiss with the local password or `/veil off`; `boot on\|off` sets login default. Run `./mob veil setup` first |
 | `/p [name]` | Quick-prompt library: `/p name` injects that prompt (no arg lists available prompts) |
 | `/diff [path]` | Show git changes (optional path) |
 | `/help` | Show available commands |

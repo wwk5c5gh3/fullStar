@@ -262,7 +262,13 @@ def _handle_command(text: str) -> str:
             return f"{msg}\n（旁人看物理屏=黑；你 /shot 截图仍拿真实内容）" if _ok else msg
         if sub == "off":
             return mac_veil.stop()[1]
-        return mac_veil.status() + "\n用法: /veil on | off"
+        if sub == "boot":
+            val = args[1].lower() if len(args) > 1 else ""
+            if val in ("on", "off"):
+                mac_veil.set_boot(val == "on")
+                return f"开机默认遮挡: {val}"
+            return "用法: /veil boot on|off"
+        return mac_veil.status() + "\n用法: /veil on | off | boot on|off"
 
     if cmd == "/shot" and args:
         platform = args[0].lower()

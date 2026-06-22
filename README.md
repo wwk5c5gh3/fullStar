@@ -237,6 +237,7 @@ Agent 按 `SKILL.md` 中的 vision loop 操作设备并回传结果。
 | `/check` | 环境检查 |
 | `/devices` | 列出设备 |
 | `/unlock` | 解锁 Android（数字 PIN，需 `.env` 配 `ANDROID_UNLOCK_PIN`；唤醒→上滑→输 PIN→回车，解锁后截图确认） |
+| `/veil on\|off\|boot` | 隐私遮罩：盖屏防窥但**不锁机**（远程操作/截图不受影响）。本地密码 或 `/veil off` 解除；`boot on\|off` 设开机默认。先 `./mob veil setup` 设密码+自启 |
 | `/p [名字]` | 快捷提示库：`/p 名字` 注入对应提示（无参列出可用提示） |
 | `/diff [路径]` | 查看 git 改动（可带路径） |
 | `/help` | 显示可用命令 |

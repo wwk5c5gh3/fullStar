@@ -1,11 +1,19 @@
-"""Control the mac-veil privacy overlay: build-once, start, stop, status.
+"""Control the mac-veil privacy overlay: build-once, start/stop, password, boot.
 
-The Swift source is compiled on first use into term-bridge/.bin/mac-veil
-(gitignored); recompiled automatically when the source is newer. start() runs
-it detached and records a pidfile; stop() sends SIGTERM (clean dismiss).
+Three dismissal paths so you can never get locked out:
+  1. Local password (break-glass) — works even if Telegram is down.
+  2. Telegram /veil off — SIGTERM.
+  3. Optional --timeout backstop.
+
+Config (inbox/veil-config.json, gitignored): salted SHA-256 password hash +
+enable_on_boot flag. The hash/salt are passed to the Swift veil via env
+(MAC_VEIL_PWHASH / MAC_VEIL_SALT), never on argv. Boot autostart is a per-user
+LaunchAgent that runs `mac_veil.py boot-start` at login.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -16,8 +24,13 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "term-bridge" / "mac-veil.swift"
 BIN = ROOT / "term-bridge" / ".bin" / "mac-veil"
 PIDFILE = ROOT / "inbox" / "mac-veil.pid"
+CONFIG = ROOT / "inbox" / "veil-config.json"
+
+AGENT_LABEL = "com.mobremote.veil"
+AGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
 
 
+# ───────────────────────── build ─────────────────────────
 def needs_build(src_mtime: float, bin_exists: bool, bin_mtime: float) -> bool:
     """True if the binary is missing or older than the source (pure, testable)."""
     if not bin_exists:
@@ -26,7 +39,6 @@ def needs_build(src_mtime: float, bin_exists: bool, bin_mtime: float) -> bool:
 
 
 def ensure_built() -> Path:
-    """Compile the Swift veil if missing/stale. Returns the binary path."""
     src_m = SRC.stat().st_mtime
     bin_exists = BIN.exists()
     bin_m = BIN.stat().st_mtime if bin_exists else 0.0
@@ -36,6 +48,63 @@ def ensure_built() -> Path:
     return BIN
 
 
+def build_argv(binary: Path, message: str | None, timeout: float) -> list[str]:
+    """Construct the veil command line (pure, testable)."""
+    cmd = [str(binary)]
+    if timeout and timeout > 0:
+        cmd += ["--timeout", str(timeout)]
+    if message:
+        cmd += ["--message", message]
+    return cmd
+
+
+# ───────────────────────── config / password ─────────────────────────
+def load_config() -> dict:
+    try:
+        return json.loads(CONFIG.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, CONFIG)
+
+
+def hash_password(password: str, salt: str) -> str:
+    """Salted SHA-256 hex — MUST match the Swift side: sha256(salt + password)."""
+    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+
+
+def set_password(password: str) -> None:
+    if not password:
+        raise ValueError("password must not be empty")
+    salt = os.urandom(8).hex()
+    cfg = load_config()
+    cfg["salt"] = salt
+    cfg["pwd_hash"] = hash_password(password, salt)
+    save_config(cfg)
+
+
+def set_boot(enabled: bool) -> None:
+    cfg = load_config()
+    cfg["enable_on_boot"] = bool(enabled)
+    save_config(cfg)
+
+
+def _password_env() -> dict:
+    """Env carrying the password hash/salt to the Swift veil (not on argv)."""
+    cfg = load_config()
+    env = dict(os.environ)
+    if cfg.get("pwd_hash") and cfg.get("salt"):
+        env["MAC_VEIL_PWHASH"] = cfg["pwd_hash"]
+        env["MAC_VEIL_SALT"] = cfg["salt"]
+    return env
+
+
+# ───────────────────────── process control ─────────────────────────
 def _read_pid() -> int | None:
     try:
         pid = int(PIDFILE.read_text().strip())
@@ -49,7 +118,6 @@ def _read_pid() -> int | None:
 
 
 def running_pid() -> int | None:
-    """PID of a live veil process (pidfile first, then pgrep fallback)."""
     pid = _read_pid()
     if pid:
         return pid
@@ -65,16 +133,6 @@ def running_pid() -> int | None:
         except ValueError:
             continue
     return None
-
-
-def build_argv(binary: Path, message: str | None, timeout: float) -> list[str]:
-    """Construct the veil command line (pure, testable)."""
-    cmd = [str(binary)]
-    if timeout and timeout > 0:
-        cmd += ["--timeout", str(timeout)]
-    if message:
-        cmd += ["--message", message]
-    return cmd
 
 
 def start(message: str | None = None, timeout: float = 0) -> tuple[bool, str]:
@@ -94,10 +152,13 @@ def start(message: str | None = None, timeout: float = 0) -> tuple[bool, str]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env=_password_env(),
     )
     PIDFILE.parent.mkdir(parents=True, exist_ok=True)
     PIDFILE.write_text(str(proc.pid))
-    return True, f"veil up (pid {proc.pid})"
+    has_pw = bool(load_config().get("pwd_hash"))
+    note = "" if has_pw else "（⚠ 未设本地密码，TG 不可用时只能 SSH/kill 解除——建议 ./mob veil setup）"
+    return True, f"veil up (pid {proc.pid}){note}"
 
 
 def stop() -> tuple[bool, str]:
@@ -115,21 +176,111 @@ def stop() -> tuple[bool, str]:
 
 def status() -> str:
     pid = running_pid()
-    return f"veil: up (pid {pid})" if pid else "veil: off"
+    cfg = load_config()
+    up = f"up (pid {pid})" if pid else "off"
+    pw = "已设" if cfg.get("pwd_hash") else "未设"
+    boot = "开" if cfg.get("enable_on_boot") else "关"
+    agent = "已装" if AGENT_PLIST.exists() else "未装"
+    return f"veil: {up} · 本地密码: {pw} · 开机默认: {boot} · 自启服务: {agent}"
+
+
+# ───────────────────────── LaunchAgent (boot autostart) ─────────────────────────
+def _plist_xml() -> str:
+    py = sys.executable
+    script = str(ROOT / "term-bridge" / "mac_veil.py")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{py}</string>
+    <string>{script}</string>
+    <string>boot-start</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+"""
+
+
+def install_agent() -> tuple[bool, str]:
+    AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    AGENT_PLIST.write_text(_plist_xml(), encoding="utf-8")
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(AGENT_PLIST)],
+                   capture_output=True)  # ignore if not loaded
+    r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(AGENT_PLIST)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return False, f"launchctl bootstrap failed: {(r.stderr or r.stdout).strip()}"
+    return True, f"自启服务已安装：{AGENT_PLIST}"
+
+
+def uninstall_agent() -> tuple[bool, str]:
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(AGENT_PLIST)],
+                   capture_output=True)
+    AGENT_PLIST.unlink(missing_ok=True)
+    return True, "自启服务已卸载"
+
+
+def boot_start() -> tuple[bool, str]:
+    """Invoked by the LaunchAgent at login: veil up only if enabled in config."""
+    if load_config().get("enable_on_boot"):
+        return start()
+    return True, "boot-start: enable_on_boot=false, 不遮挡"
+
+
+# ───────────────────────── CLI ─────────────────────────
+def _setup_interactive() -> tuple[bool, str]:
+    import getpass
+
+    pw1 = getpass.getpass("设置遮罩解除密码: ")
+    pw2 = getpass.getpass("再输一次: ")
+    if pw1 != pw2:
+        return False, "两次密码不一致"
+    if not pw1:
+        return False, "密码不能为空"
+    set_password(pw1)
+    ans = input("开机默认自动遮挡? [y/N]: ").strip().lower()
+    set_boot(ans in ("y", "yes"))
+    ok, msg = install_agent()
+    if not ok:
+        return False, msg
+    return True, f"✓ 已设密码 + 开机默认={'开' if ans in ('y','yes') else '关'} + {msg}"
 
 
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "status"
     rest = argv[1:]
     if cmd == "on":
-        timeout = float(rest[0]) if rest else 0
-        ok, msg = start(timeout=timeout)
+        ok, msg = start(timeout=float(rest[0]) if rest else 0)
     elif cmd == "off":
         ok, msg = stop()
     elif cmd == "status":
         ok, msg = True, status()
+    elif cmd == "setup":
+        ok, msg = _setup_interactive()
+    elif cmd == "set-password":
+        if not rest:
+            ok, msg = False, "用法: set-password <密码>"
+        else:
+            set_password(rest[0]); ok, msg = True, "✓ 密码已设置"
+    elif cmd == "boot":
+        if rest and rest[0] in ("on", "off"):
+            set_boot(rest[0] == "on"); ok, msg = True, f"开机默认遮挡: {rest[0]}"
+        else:
+            ok, msg = False, "用法: boot on|off"
+    elif cmd == "boot-start":
+        ok, msg = boot_start()
+    elif cmd == "install-agent":
+        ok, msg = install_agent()
+    elif cmd == "uninstall-agent":
+        ok, msg = uninstall_agent()
     else:
-        ok, msg = False, f"usage: mac_veil.py on|off|status (got {cmd!r})"
+        ok, msg = False, f"用法: mac_veil.py on|off|status|setup|set-password|boot|install-agent|uninstall-agent (got {cmd!r})"
     print(msg)
     return 0 if ok else 1
 
