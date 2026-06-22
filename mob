@@ -51,7 +51,7 @@ case "$cmd" in
     exec cat "$ROOT/inbox/pending.txt" 2>/dev/null || echo "(inbox empty)"
     ;;
   veil)
-    exec python3 "$ROOT/term-bridge/mac_veil.py" "$@"
+    exec mac-veil "$@"
     ;;
   # Backend-aware (respect TG_TERM_BACKEND=iterm|terminal)
   inject|tg-iterm|term-inject)

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mac-veil"
+version = "0.1.0"
+description = "Privacy veil for macOS: black out the screen (not a lock), with local-password / timeout dismissal and login autostart"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+mac-veil = "mac_veil.cli:main"
+veilkit = "mac_veil.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mac_veil*"]
+
+[tool.setuptools.package-data]
+mac_veil = ["overlay.swift"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
