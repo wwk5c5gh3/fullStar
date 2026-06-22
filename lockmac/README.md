@@ -41,9 +41,22 @@ lockmac unveil           # dismiss the overlay
 lockmac lock             # REAL system lock — one-way, cannot be undone remotely
 lockmac status
 lockmac passwd           # change password (verifies the current one first)
+lockmac setup-2fa        # enable two-step (TOTP); unlock then needs password + 6-digit code
 lockmac boot on|off      # toggle "veil on next login"
 lockmac install-agent    # / uninstall-agent — manage login autostart
 ```
+
+### Two-step verification (TOTP, optional)
+
+`lockmac setup-2fa` prints a secret + `otpauth://` URI — add it to an
+authenticator (Google Authenticator, 1Password, …). After that the second factor
+is required **both** ways:
+- **Local**: the overlay shows a password field **and** a 6-digit code field.
+- **Telegram**: `/unveil <6-digit-code>` (your chat is the first factor, the code
+  the second).
+
+Same RFC 6238 algorithm on both sides, so any authenticator code works
+everywhere. `lockmac 2fa-off` disables it.
 
 ## Three ways to dismiss (never get locked out)
 

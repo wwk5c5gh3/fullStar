@@ -1,27 +1,15 @@
-// lockmac.swift — a privacy veil: a black, top-most overlay covering every
+// lockmac overlay — a privacy veil: a black, top-most overlay covering every
 // display so onlookers can't see the screen, WITHOUT locking the Mac.
 //
-// Why this works with the rest of mob-remote:
-//   • Remote injection uses iTerm `write text` (no keyboard focus / no display
-//     dependency), so it keeps working while the veil is up.
-//   • Screenshots use `screencapture -l <windowID>` which grabs a specific
-//     window's buffer regardless of what covers it — so you still see the real
-//     content on your phone.
-//   • The veil uses CGShieldingWindowLevel (above normal windows), so even when
-//     iTerm is activated by an inject it never rises above the veil locally.
+// Dismiss (so you can NEVER get locked out):
+//   1. Local password (salted SHA-256, via env LOCKMAC_PWHASH/LOCKMAC_SALT).
+//      If LOCKMAC_TOTP_SECRET is set, a second factor (6-digit TOTP) is ALSO
+//      required — two-step unlock. TOTP matches the Python side (RFC 6238).
+//   2. SIGTERM (`lockmac unveil` / Telegram).
+//   3. --timeout N auto-dismiss.
+// Last resort: ssh in and `kill`, or Force-Quit.
 //
-// THREE ways to dismiss (so you can NEVER get locked out):
-//   1. Local password (break-glass): type it into the on-screen field. Works
-//      even if Telegram / network is down. Hash is salted SHA-256, passed via
-//      env (LOCKMAC_PWHASH + LOCKMAC_SALT), never in argv.
-//   2. Telegram `/veil off` → SIGTERM.
-//   3. --timeout N auto-dismiss (optional max-duration backstop).
-// Last-resort: SSH in and `kill` the process, or Force-Quit.
-//
-// It is a PRIVACY screen, not a security lock: Force-Quit, SSH kill, or reboot
-// all dismiss it. Good against shoulder-surfing, not a determined attacker.
-//
-// Usage:  lockmac [--timeout SECONDS] [--message TEXT]
+// Privacy screen, not a security lock: Force-Quit / ssh kill / reboot dismiss it.
 import Cocoa
 import CryptoKit
 
@@ -29,9 +17,46 @@ func sha256Hex(_ s: String) -> String {
     SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
+// ── TOTP (RFC 6238, HMAC-SHA1, 30s, 6 digits) — must match lockmac/totp.py ──
+func base32Decode(_ s: String) -> Data? {
+    let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+    var bits = 0, value = 0
+    var out = [UInt8]()
+    for ch in s.uppercased() where ch != "=" {
+        guard let idx = alphabet.firstIndex(of: ch) else { return nil }
+        value = (value << 5) | idx
+        bits += 5
+        if bits >= 8 { out.append(UInt8((value >> (bits - 8)) & 0xFF)); bits -= 8 }
+    }
+    return Data(out)
+}
+
+func hotp(_ key: Data, _ counter: UInt64) -> String {
+    var be = counter.bigEndian
+    let msg = withUnsafeBytes(of: &be) { Data($0) }
+    let mac = HMAC<Insecure.SHA1>.authenticationCode(for: msg, using: SymmetricKey(data: key))
+    let h = Array(mac)
+    let o = Int(h[h.count - 1] & 0x0F)
+    let bin = (UInt32(h[o] & 0x7F) << 24) | (UInt32(h[o + 1]) << 16)
+            | (UInt32(h[o + 2]) << 8) | UInt32(h[o + 3])
+    return String(format: "%06u", bin % 1_000_000)
+}
+
+func verifyTOTP(_ secretB32: String, _ code: String, window: Int = 1) -> Bool {
+    let trimmed = code.trimmingCharacters(in: .whitespaces)
+    if secretB32.isEmpty || trimmed.isEmpty { return false }
+    guard let key = base32Decode(secretB32) else { return false }
+    let now = Int64(Date().timeIntervalSince1970) / 30
+    for w in -window...window where hotp(key, UInt64(now + Int64(w))) == trimmed {
+        return true
+    }
+    return false
+}
+
 let env = ProcessInfo.processInfo.environment
 let expectedHash = env["LOCKMAC_PWHASH"] ?? ""
 let salt = env["LOCKMAC_SALT"] ?? ""
+let totpSecret = env["LOCKMAC_TOTP_SECRET"] ?? ""
 
 var timeout: Double = 0
 var message = "🔒 屏幕已遮挡"
@@ -50,49 +75,59 @@ while ai < args.count {
     ai += 1
 }
 
-// Handles the local password field: hashes the attempt (salt + input) and
-// dismisses on match. Wrong input clears the field and shows a hint.
+// Verifies password (+ TOTP if configured). Both fields' Return triggers a try.
 final class UnlockController: NSObject, NSTextFieldDelegate {
     let expected: String
     let salt: String
+    let totpSecret: String
+    weak var pwField: NSSecureTextField?
+    weak var codeField: NSTextField?
     weak var hint: NSTextField?
 
-    init(expected: String, salt: String) {
+    init(expected: String, salt: String, totpSecret: String) {
         self.expected = expected
         self.salt = salt
+        self.totpSecret = totpSecret
+    }
+
+    func tryUnlock() {
+        let pw = pwField?.stringValue ?? ""
+        let pwOK = !expected.isEmpty && sha256Hex(salt + pw) == expected
+        let codeOK = totpSecret.isEmpty || verifyTOTP(totpSecret, codeField?.stringValue ?? "")
+        if pwOK && codeOK { exit(0) }
+        if !pwOK {
+            hint?.stringValue = "密码错误，请重试"
+        } else {
+            hint?.stringValue = "验证码错误，请重试"
+        }
+        pwField?.stringValue = ""
+        codeField?.stringValue = ""
     }
 
     func control(_ control: NSControl, textView: NSTextView,
                  doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.insertNewline(_:)),
-              let field = control as? NSTextField else { return false }
-        if !expected.isEmpty, sha256Hex(salt + field.stringValue) == expected {
-            exit(0)
-        }
-        field.stringValue = ""
-        hint?.stringValue = "密码错误，请重试"
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        tryUnlock()
         return true
     }
 }
 
-// Borderless NSWindows return canBecomeKey=false by default, so the password
-// field can't receive keystrokes. Override it so the veil accepts keyboard input.
+// Borderless windows are canBecomeKey=false by default → no keystrokes. Override.
 final class VeilWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
 
 let app = NSApplication.shared
-// .regular (not .accessory) so the app reliably gets keyboard focus for the
-// password field; no Dock icon is shown for a borderless overlay in practice.
-app.setActivationPolicy(.regular)
+app.setActivationPolicy(.regular)  // reliable keyboard focus for the unlock fields
 
-let unlock = UnlockController(expected: expectedHash, salt: salt)
 let hasPassword = !expectedHash.isEmpty
+let hasTotp = !totpSecret.isEmpty
+let unlock = UnlockController(expected: expectedHash, salt: salt, totpSecret: totpSecret)
 
 var windows: [NSWindow] = []
 var mainWin: VeilWindow?
-var pwField: NSSecureTextField?
+var firstField: NSTextField?
 let mainScreen = NSScreen.main
 for screen in NSScreen.screens {
     let win = VeilWindow(
@@ -120,34 +155,47 @@ for screen in NSScreen.screens {
     label.isBezeled = false
     label.isEditable = false
     label.sizeToFit()
-    label.frame.origin = NSPoint(x: cx - label.frame.width / 2, y: cy + 40)
+    label.frame.origin = NSPoint(x: cx - label.frame.width / 2, y: cy + 60)
     label.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
     content.addSubview(label)
 
-    // Password field only on the main screen, only when a password is set.
+    // Unlock fields only on the main screen, only when a password is set.
     if hasPassword, screen == mainScreen {
-        let field = NSSecureTextField(frame: NSRect(x: cx - 120, y: cy - 10, width: 240, height: 28))
-        field.placeholderString = "输入密码解除"
-        field.alignment = .center
-        field.delegate = unlock
-        field.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
-        content.addSubview(field)
+        let pw = NSSecureTextField(frame: NSRect(x: cx - 120, y: cy + 16, width: 240, height: 28))
+        pw.placeholderString = "输入密码"
+        pw.alignment = .center
+        pw.delegate = unlock
+        pw.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        content.addSubview(pw)
+        unlock.pwField = pw
+        firstField = pw
 
-        let hint = NSTextField(labelWithString: "解除遮挡：输入密码并回车，或在 Telegram 发 /veil off")
+        if hasTotp {
+            let code = NSTextField(frame: NSRect(x: cx - 120, y: cy - 20, width: 240, height: 28))
+            code.placeholderString = "6 位验证码"
+            code.alignment = .center
+            code.delegate = unlock
+            code.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+            content.addSubview(code)
+            unlock.codeField = code
+        }
+
+        let tip = hasTotp ? "解除：输入密码 + 6位验证码并回车，或 Telegram /unveil <码>"
+                          : "解除：输入密码并回车，或 Telegram /unveil"
+        let hint = NSTextField(labelWithString: tip)
         hint.textColor = NSColor(white: 0.3, alpha: 1.0)
         hint.font = NSFont.systemFont(ofSize: 13)
         hint.backgroundColor = .clear
         hint.isBezeled = false
         hint.isEditable = false
         hint.sizeToFit()
-        hint.frame.origin = NSPoint(x: cx - hint.frame.width / 2, y: cy - 50)
+        hint.frame.origin = NSPoint(x: cx - hint.frame.width / 2, y: cy - 64)
         hint.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
         content.addSubview(hint)
         unlock.hint = hint
 
-        win.initialFirstResponder = field
+        win.initialFirstResponder = pw
         mainWin = win
-        pwField = field
     }
 
     win.makeKeyAndOrderFront(nil)
@@ -155,17 +203,14 @@ for screen in NSScreen.screens {
 }
 app.activate(ignoringOtherApps: true)
 
-// Make the password field the key window's first responder so it gets keystrokes.
 if let w = mainWin {
     w.makeKeyAndOrderFront(nil)
-    if let f = pwField { w.makeFirstResponder(f) }
+    if let f = firstField { w.makeFirstResponder(f) }
 }
 
-// Telegram `/veil off` sends SIGTERM. Clean exit.
 signal(SIGTERM) { _ in exit(0) }
 signal(SIGINT) { _ in exit(0) }
 
-// Optional max-duration backstop (also used for safe testing).
 if timeout > 0 {
     Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { _ in exit(0) }
 }
