@@ -233,8 +233,13 @@ def heartbeat_due(last_sent: float, now: float, interval: int) -> bool:
 
 
 def deadman_triggered(last_sent: float, last_ack: float, now: float, grace: int) -> bool:
-    """True if a sent heartbeat went unacked past the grace window (pure)."""
-    return last_sent > 0 and last_ack < last_sent and (now - last_sent) >= grace
+    """True if a heartbeat is outstanding and no ack for `grace` since last ack.
+
+    Measured from last_ack (not last_sent): heartbeats keep resending and would
+    otherwise keep pushing the deadline forward, so it could never fire.
+    last_sent > last_ack means there's an unacked heartbeat in flight.
+    """
+    return last_sent > last_ack and (now - last_ack) >= grace
 
 
 def offline_triggered(last_online: float, now: float, offline: int) -> bool:

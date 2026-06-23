@@ -32,6 +32,13 @@ def test_deadman_not_triggered_before_any_heartbeat():
     assert tg.deadman_triggered(last_sent=0.0, last_ack=0.0, now=999.0, grace=300) is False
 
 
+def test_deadman_fires_even_as_heartbeats_keep_resending():
+    # regression: heartbeats resend every interval (last_sent keeps advancing),
+    # but with no ack the deadline must still be reached (measured from last_ack).
+    # last_ack=0 (never tapped), last_sent=280 (latest beat), grace=300, now=300
+    assert tg.deadman_triggered(last_sent=280.0, last_ack=0.0, now=300.0, grace=300) is True
+
+
 def test_offline_triggered_after_timeout():
     assert tg.offline_triggered(last_online=100.0, now=3700.0, offline=3600) is True
 
