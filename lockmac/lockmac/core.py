@@ -135,23 +135,90 @@ def totp_enabled() -> bool:
     return bool(get_totp_secret())
 
 
-def set_heartbeat(interval: int, grace: int, action: str) -> None:
-    """Dead-man switch: ping TG every `interval`s; if no ack within `grace`s,
-    run `action` (lock|veil). interval<=0 disables."""
+def set_heartbeat(interval: int, grace: int, action: str, offline: int = 0) -> None:
+    """Dead-man switch. Two independent triggers fire `action` (lock|veil|purge):
+      • heartbeat: ping TG every `interval`s; no ack within `grace`s → fire.
+      • offline:   can't reach Telegram for `offline`s (lost contact) → fire.
+    Any of interval/offline <= 0 disables that trigger. action 'purge' deletes
+    the configured purge dirs (see set_purge_dirs)."""
     cfg = load_config()
     cfg["hb_interval"] = int(interval)
     cfg["hb_grace"] = int(grace)
-    cfg["hb_action"] = action if action in ("lock", "veil") else "lock"
+    cfg["hb_offline"] = int(offline)
+    cfg["hb_action"] = action if action in ("lock", "veil", "purge") else "lock"
     save_config(cfg)
 
 
-def heartbeat_cfg() -> tuple[int, int, str]:
+def heartbeat_cfg() -> tuple[int, int, str, int]:
     cfg = load_config()
     return (
         int(cfg.get("hb_interval", 0)),
         int(cfg.get("hb_grace", 300)),
         cfg.get("hb_action", "lock"),
+        int(cfg.get("hb_offline", 0)),
     )
+
+
+# ── purge (delete configured directories) — destructive, guarded ──
+# Never allow these (exact match) or anything inside the system trees below.
+_PURGE_FORBIDDEN_EXACT = {
+    "/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/private",
+    "/Library", "/Applications", "/Users", "/Volumes", str(HOME),
+}
+_PURGE_FORBIDDEN_TREES = ("/System", "/usr", "/bin", "/sbin", "/Library", "/Applications")
+
+
+def is_safe_purge_path(path: str) -> bool:
+    """True only for an absolute path that is NOT a root/system location (pure).
+
+    Guards the destructive purge: rejects '/', $HOME itself, system trees, and
+    relative paths. Targets must be specific dirs (e.g. ~/Secret, /Volumes/X/data).
+    """
+    if not path or not path.strip():
+        return False
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        return False
+    s = os.path.normpath(str(p))
+    if s in _PURGE_FORBIDDEN_EXACT:
+        return False
+    return not any(s == t or s.startswith(t + "/") for t in _PURGE_FORBIDDEN_TREES)
+
+
+def set_purge_dirs(dirs: list[str]) -> None:
+    cfg = load_config()
+    cfg["purge_dirs"] = [d for d in dirs if d.strip()]
+    save_config(cfg)
+
+
+def get_purge_dirs() -> list[str]:
+    return list(load_config().get("purge_dirs", []))
+
+
+def purge_dirs_now() -> tuple[bool, str]:
+    """Delete the configured directories (skips unsafe/missing). Returns a summary."""
+    import shutil
+
+    dirs = get_purge_dirs()
+    if not dirs:
+        return False, "未配置删除目录（lockmac purge-add <路径>）"
+    done, skipped = [], []
+    for d in dirs:
+        if not is_safe_purge_path(d):
+            skipped.append(f"{d}(危险路径,跳过)")
+            continue
+        p = Path(d).expanduser()
+        if p.exists():
+            shutil.rmtree(p, ignore_errors=True)
+            done.append(str(p))
+        else:
+            skipped.append(f"{d}(不存在)")
+    msg = f"已删除 {len(done)} 个目录"
+    if done:
+        msg += "：" + ", ".join(done)
+    if skipped:
+        msg += f"；跳过 {len(skipped)}：" + ", ".join(skipped)
+    return True, msg
 
 
 def _password_env() -> dict:

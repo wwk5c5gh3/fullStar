@@ -142,6 +142,20 @@ def deadman_triggered(last_sent: float, last_ack: float, now: float, grace: int)
     return last_sent > 0 and last_ack < last_sent and (now - last_sent) >= grace
 
 
+def offline_triggered(last_online: float, now: float, offline: int) -> bool:
+    """True if we've been unable to reach Telegram for >= offline seconds (pure)."""
+    return offline > 0 and (now - last_online) >= offline
+
+
+def _do_action(action: str) -> str:
+    """Run the dead-man action locally (works offline). Returns a summary."""
+    if action == "veil":
+        return core.start()[1]
+    if action == "purge":
+        return core.purge_dirs_now()[1]
+    return core.system_lock()[1]
+
+
 def listen(poll_timeout: int = 10) -> int:
     """Long-poll getUpdates; act on /veil /unveil /lock /status, run the dead-man
     heartbeat, and honor '✅ 我在' button acks. Only the configured chat is
@@ -151,19 +165,28 @@ def listen(poll_timeout: int = 10) -> int:
     if not token or not chat:
         print("tg-listen: no token/chat — run `lockmac tg-setup` first")
         return 1
-    interval, grace, action = core.heartbeat_cfg()
-    extra = f" · heartbeat {interval}s/grace {grace}s→{action}" if interval > 0 else ""
+    interval, grace, action, offline = core.heartbeat_cfg()
+    parts_desc = []
+    if interval > 0:
+        parts_desc.append(f"heartbeat {interval}s/grace {grace}s")
+    if offline > 0:
+        parts_desc.append(f"offline {offline}s")
+    extra = (f" · {' · '.join(parts_desc)}→{action}") if parts_desc else ""
     print(f"lockmac tg-listen: polling (chat={chat}){extra}")
     offset = 0
     last_sent = 0.0
     last_ack = time.time()
+    last_online = time.time()
     while True:
+        online = True
         try:
             resp = _api(token, "getUpdates",
                         {"offset": offset, "timeout": poll_timeout},
                         timeout=poll_timeout + 10)
+            last_online = time.time()  # reached Telegram successfully
         except (urllib.error.URLError, OSError, ValueError) as exc:
             print(f"getUpdates error: {exc}")
+            online = False
             time.sleep(3)
             resp = {}
         for item in resp.get("result") or []:
@@ -181,12 +204,16 @@ def listen(poll_timeout: int = 10) -> int:
                 if cb.get("data") == "hb_ack":
                     last_ack = time.time()
                     answer_callback(cb.get("id", ""))
+        now = time.time()
+        # Trigger 1: heartbeat sent but not acked within grace (online, person AWOL)
         if interval > 0:
-            now = time.time()
-            if heartbeat_due(last_sent, now, interval):
-                if send_heartbeat():
-                    last_sent = now
+            if heartbeat_due(last_sent, now, interval) and send_heartbeat():
+                last_sent = now
             if deadman_triggered(last_sent, last_ack, now, grace):
-                core.start() if action == "veil" else core.system_lock()
-                notify("⏰ 未在宽限内响应心跳，已自动锁定。")
-                last_ack = time.time()  # fire once per missed beat
+                out = _do_action(action)
+                notify(f"⏰ 未响应心跳，已执行 {action}：{out}")  # best-effort if online
+                last_ack = now  # fire once per missed beat
+        # Trigger 2: lost contact with Telegram for too long (offline / removed)
+        if offline_triggered(last_online, now, offline):
+            _do_action(action)  # runs locally even with no network
+            last_online = now   # fire once per offline window

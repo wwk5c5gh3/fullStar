@@ -32,11 +32,24 @@ def test_deadman_not_triggered_before_any_heartbeat():
     assert tg.deadman_triggered(last_sent=0.0, last_ack=0.0, now=999.0, grace=300) is False
 
 
+def test_offline_triggered_after_timeout():
+    assert tg.offline_triggered(last_online=100.0, now=3700.0, offline=3600) is True
+
+
+def test_offline_not_triggered_within_timeout():
+    assert tg.offline_triggered(last_online=100.0, now=200.0, offline=3600) is False
+
+
+def test_offline_disabled_when_zero():
+    assert tg.offline_triggered(last_online=0.0, now=99999.0, offline=0) is False
+
+
 def test_core_heartbeat_cfg_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "CONFIG", tmp_path / "config.json")
-    iv, gr, ac = core.heartbeat_cfg()
-    assert iv == 0  # default off
-    core.set_heartbeat(1800, 600, "veil")
-    assert core.heartbeat_cfg() == (1800, 600, "veil")
-    core.set_heartbeat(60, 120, "bogus")  # invalid action → lock
+    iv, gr, ac, off = core.heartbeat_cfg()
+    assert (iv, off) == (0, 0)  # default off
+    core.set_heartbeat(1800, 600, "purge", 7200)
+    assert core.heartbeat_cfg() == (1800, 600, "purge", 7200)
+    core.set_heartbeat(60, 120, "bogus")  # invalid action → lock; offline defaults 0
     assert core.heartbeat_cfg()[2] == "lock"
+    assert core.heartbeat_cfg()[3] == 0

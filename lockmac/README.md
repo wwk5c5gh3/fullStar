@@ -87,21 +87,43 @@ chat id is honored, fail-closed):
 
 Use `tg-listen` for a foreground run, or `tg-install` to keep it always-on.
 
-### Dead-man heartbeat (auto-lock if you don't respond)
+### Dead-man switch (auto-act if you don't respond / go offline)
 
-`tg-listen` can periodically ping Telegram with a check-in button; if you don't
-tap it within the grace window, lockmac auto-locks:
+`tg-listen` runs a local dead-man timer. **Two independent triggers** fire the
+configured action (`lock` | `veil` | `purge`):
 
 ```bash
-lockmac heartbeat 1800 600 lock   # every 30min, 10min grace, then system lock
-lockmac heartbeat 1800 600 veil   # …or raise the removable veil instead
-lockmac heartbeat 0               # off
-lockmac heartbeat                 # show current setting
+# deadman <check-in interval> <grace> <action> [offline-timeout]
+lockmac deadman 1800 600 lock          # check-in every 30m, no tap in 10m → system lock
+lockmac deadman 0 0 purge 3600         # no check-in; can't reach Telegram for 1h → purge dirs
+lockmac deadman 1800 600 veil 7200     # check-in OR 2h offline → raise veil
+lockmac deadman 0 0 lock 0             # both off
+lockmac deadman                        # show current
 ```
 
-The check-in arrives as a message with a **✅ 我在** button — tap it to reset
-the timer. Miss the grace window and the configured action (`lock` = real system
-lock, `veil` = overlay) fires automatically. Runs inside `tg-listen`.
+- **Heartbeat trigger**: sends a **✅ 我在** button every interval; tap to reset.
+  Miss the grace window → fire. (person AWOL while online)
+- **Offline trigger**: can't reach Telegram for `offline-timeout` seconds → fire.
+  Runs **locally**, so it works even with no network (device removed / powered off
+  network). This is the true dead-man: the timer runs locally; only contact resets it.
+
+Actions: `lock` = real system lock · `veil` = overlay · `purge` = delete the
+configured directories.
+
+### Purge list (for `action=purge`)
+
+```bash
+lockmac purge-add ~/Secret           # add a dir (rejects /, $HOME, system trees)
+lockmac purge-add /Volumes/USB/data
+lockmac purge-list
+lockmac purge-clear
+lockmac purge-now --yes              # delete now (manual; --yes required)
+```
+
+⚠️ **Destructive.** Guards: paths must be absolute and are rejected if they are
+`/`, `$HOME` itself, or any system tree (`/System`, `/Library`, `/usr`, …). Only
+specific directories you add are ever deleted. For real whole-disk crypto-erase
+you need MDM (`EraseDevice`) — that's a later, server-backed phase.
 
 > One bot, one poller: getUpdates allows a single consumer per token. If
 > something else already polls that bot (e.g. another relay), give lockmac its

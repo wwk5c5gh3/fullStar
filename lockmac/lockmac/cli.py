@@ -104,23 +104,56 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif cmd == "2fa-off":
         core.set_totp_secret(""); ok, msg = True, "二步验证已关闭"
-    elif cmd == "heartbeat":
-        # heartbeat <interval_s> [grace_s] [lock|veil]   (interval 0 = off)
+    elif cmd in ("heartbeat", "deadman"):
+        # heartbeat <interval_s> <grace_s> <action> [offline_s]
+        #   interval=0 → no active check-in; offline=0 → no lost-contact trigger
+        #   action: lock | veil | purge
         if not rest:
-            iv, gr, ac = core.heartbeat_cfg()
-            ok, msg = True, (f"心跳: {'off' if iv<=0 else f'每{iv}s'}"
-                             f" · 宽限{gr}s · 动作{ac}\n"
-                             "用法: lockmac heartbeat <间隔秒> [宽限秒] [lock|veil]（0=关）")
+            iv, gr, ac, off = core.heartbeat_cfg()
+            ok, msg = True, (
+                f"心跳: {'关' if iv<=0 else f'每{iv}s/宽限{gr}s'}"
+                f" · 失联超时: {'关' if off<=0 else f'{off}s'}"
+                f" · 动作: {ac}\n"
+                "用法: lockmac deadman <签到间隔秒> <宽限秒> <lock|veil|purge> [失联超时秒]\n"
+                "  例: lockmac deadman 0 0 purge 3600   # 连不上TG满1小时→删目录\n"
+                "  例: lockmac deadman 1800 600 lock 7200  # 30min签到/10min不点，或失联2h→锁"
+            )
         else:
             try:
                 iv = int(rest[0])
                 gr = int(rest[1]) if len(rest) > 1 else 300
                 ac = rest[2] if len(rest) > 2 else "lock"
-                core.set_heartbeat(iv, gr, ac)
-                ok, msg = True, (f"✓ 心跳已设：每 {iv}s 签到，{gr}s 未响应则 {ac}"
-                                 if iv > 0 else "✓ 心跳已关闭")
+                off = int(rest[3]) if len(rest) > 3 else 0
+                core.set_heartbeat(iv, gr, ac, off)
+                _, _, ac2, _ = core.heartbeat_cfg()
+                ok, msg = True, (
+                    f"✓ dead-man 已设：动作={ac2}"
+                    f"{f'，每{iv}s签到/{gr}s不点触发' if iv>0 else ''}"
+                    f"{f'，失联{off}s触发' if off>0 else ''}"
+                    + ("" if (iv > 0 or off > 0) else "（两个触发都关=不会自动执行）")
+                )
             except ValueError:
-                ok, msg = False, "用法: lockmac heartbeat <间隔秒> [宽限秒] [lock|veil]"
+                ok, msg = False, "用法: lockmac deadman <签到间隔秒> <宽限秒> <lock|veil|purge> [失联超时秒]"
+    elif cmd == "purge-add":
+        if not rest:
+            ok, msg = False, "用法: lockmac purge-add <绝对路径>"
+        elif not core.is_safe_purge_path(rest[0]):
+            ok, msg = False, f"拒绝：{rest[0]} 是危险/系统路径，不允许"
+        else:
+            dirs = core.get_purge_dirs()
+            if rest[0] not in dirs:
+                dirs.append(rest[0]); core.set_purge_dirs(dirs)
+            ok, msg = True, f"✓ 已加入删除清单：{rest[0]}\n当前：{core.get_purge_dirs()}"
+    elif cmd == "purge-list":
+        ok, msg = True, f"删除清单：{core.get_purge_dirs() or '(空)'}"
+    elif cmd == "purge-clear":
+        core.set_purge_dirs([]); ok, msg = True, "✓ 删除清单已清空"
+    elif cmd == "purge-now":
+        if "--yes" not in rest:
+            ok, msg = False, (f"⚠️ 将删除：{core.get_purge_dirs() or '(未配置)'}\n"
+                              "确认请加 --yes： lockmac purge-now --yes")
+        else:
+            ok, msg = core.purge_dirs_now()
     elif cmd == "tg-install":
         ok, msg = core.install_tg_agent()
     elif cmd == "tg-uninstall":
@@ -128,8 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ok, msg = False, (
             f"usage: lockmac veil|unveil|lock|status|setup|passwd|set-password|boot|"
-            f"setup-2fa|2fa-off|install-agent|uninstall-agent|tg-setup|tg-test|"
-            f"tg-listen|tg-install|tg-uninstall (got {cmd!r})\n"
+            f"setup-2fa|2fa-off|deadman|purge-add|purge-list|purge-clear|purge-now|"
+            f"install-agent|uninstall-agent|tg-setup|tg-test|tg-listen|tg-install|"
+            f"tg-uninstall (got {cmd!r})\n"
             f"  veil/unveil = removable privacy overlay; lock = real system lock (one-way)"
         )
     print(msg)
