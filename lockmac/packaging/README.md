@@ -34,7 +34,18 @@ Users then:
 brew tap wwk5c5gh3/lockmac
 brew install lockmac
 ```
+
+**No release needed (install straight from git HEAD):** the formula has a `head`
+URL, so once the tap exists users can also:
+```bash
+brew install --HEAD wwk5c5gh3/lockmac/lockmac
+```
+
 (Swift overlay still compiles on first run → needs Xcode CLT; noted in caveats.)
+
+> ✅ Verified: built a local tap and `brew install --build-from-source` succeeded —
+> `lockmac status` ran from `/opt/homebrew/bin/lockmac`. The formula is correct;
+> only the published release tarball + tap repo remain (your one-time publish steps).
 
 ## E. Double-clickable `.pkg`
 
