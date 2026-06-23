@@ -227,6 +227,21 @@ def answer_callback(cb_id: str, text: str = "已签到 ✓") -> None:
         pass
 
 
+def mark_heartbeat_acked(chat: str, message_id: int) -> None:
+    """Edit the heartbeat message to '✅ 已签到' (removes the button) as feedback."""
+    token, _ = _creds()
+    if not token or not message_id:
+        return
+    try:
+        _api(token, "editMessageText", {
+            "chat_id": chat,
+            "message_id": message_id,
+            "text": "✅ 已签到，计时已重置。",
+        }, timeout=10)
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+
+
 def heartbeat_due(last_sent: float, now: float, interval: int) -> bool:
     """True if it's time to send the next heartbeat (pure)."""
     return interval > 0 and (now - last_sent) >= interval
@@ -305,6 +320,7 @@ def listen(poll_timeout: int = 10) -> int:
                 if cb.get("data") == "hb_ack":
                     last_ack = time.time()
                     answer_callback(cb.get("id", ""))
+                    mark_heartbeat_acked(chat, (cb.get("message") or {}).get("message_id"))
         now = time.time()
         # Trigger 1: heartbeat sent but not acked within grace (online, person AWOL)
         if interval > 0:
